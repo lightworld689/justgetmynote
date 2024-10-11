@@ -525,7 +525,7 @@ def render_html(content, read_only=False, path='/', identifier=None):
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>内容查看与编辑</title>
+        <title>JustGetMyText</title>
         {css}
     </head>
     <body>
