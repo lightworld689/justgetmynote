@@ -5,6 +5,7 @@ import os
 import logging
 from functools import wraps
 from datetime import datetime
+import secrets  # For generating secure random share IDs
 
 app = Flask(__name__)
 
@@ -18,6 +19,7 @@ FAVICON_FILE = 'favicon.ico'
 
 # 正则表达式用于验证标识符（3-24 个字母或数字）
 ID_REGEX = re.compile(r'^[A-Za-z0-9]{3,24}$')
+SHARE_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')  # 16-character hex
 
 # 禁用 Flask 默认的日志
 log = logging.getLogger('werkzeug')
@@ -119,6 +121,13 @@ def upsert_content(identifier, new_content):
     conn.commit()
     conn.close()
 
+# 生成唯一的16字符十六进制共享ID
+def generate_share_id():
+    while True:
+        share_id = secrets.token_hex(8)  # 16 characters
+        if not get_content(share_id):
+            return share_id
+
 # 日志记录装饰器
 def log_request(f):
     @wraps(f)
@@ -132,7 +141,7 @@ def log_request(f):
         return response
     return decorated_function
 
-# 主路由，处理 /0, /1, /main, /index, /
+# 主路由，处理 /0, /1, /main, /index, /share/<share_id>, /<id>, /
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 @log_request
@@ -146,6 +155,19 @@ def serve_content(path):
             content = ""
         display_path = '/' if path == '' else f'/{path}'
         return render_html(content, read_only=True, path=display_path)
+    
+    # 处理 /share/<share_id> 路由
+    if path.startswith('share/'):
+        share_id = path.split('share/')[1]
+        if not SHARE_ID_REGEX.fullmatch(share_id):
+            return "Invalid Share ID", 400
+        content = get_content(share_id)
+        if not content:
+            return "Share ID not found", 404
+        flag = f'''
+            <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - Shared with you - ReadOnly
+        '''
+        return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag)
     
     # 处理 /<id> 路由
     if ID_REGEX.fullmatch(path):
@@ -171,8 +193,34 @@ def update(identifier):
         return jsonify({'status': 'error', 'message': '缺少内容。'}), 400
     
     new_content = data['content']
+    
+    # 检查内容长度
+    if len(new_content) > 100000:
+        return jsonify({'status': 'error', 'message': '内容长度超过100,000字符限制。'}), 400
+    
     upsert_content(identifier, new_content)
     return jsonify({'status': 'success', 'message': '内容已更新。'})
+
+# 创建共享链接的API
+@app.route('/create_share/<identifier>', methods=['POST'])
+@log_request
+def create_share(identifier):
+    # 验证标识符
+    if not ID_REGEX.fullmatch(identifier):
+        return jsonify({'status': 'error', 'message': '无效的标识符。'}), 400
+    
+    content = get_content(identifier)
+    if not content:
+        return jsonify({'status': 'error', 'message': '标识符不存在。'}), 404
+    
+    # 生成唯一的共享ID
+    share_id = generate_share_id()
+    
+    # 插入共享内容
+    upsert_content(share_id, content)
+    
+    share_url = f"/share/{share_id}"
+    return jsonify({'status': 'success', 'share_url': share_url})
 
 # 提供静态文件（如 /meta/bg.png）
 @app.route('/meta/<path:filename>')
@@ -190,7 +238,7 @@ def favicon():
         return "", 204  # No Content
 
 # 渲染HTML页面
-def render_html(content, read_only=False, path='/', identifier=None):
+def render_html(content, read_only=False, path='/', identifier=None, custom_flag=None):
     # 内联CSS
     css = """
     <style>
@@ -470,50 +518,79 @@ def render_html(content, read_only=False, path='/', identifier=None):
     }
     </style>
     """
+    
+    # 内联JavaScript，实现客户端每秒检测内容变化，并处理分享按钮
+    if not read_only:
+        js = f"""
+        <script>
+        (function(){{
+            document.addEventListener('DOMContentLoaded', function() {{
+                const contentArea = document.getElementById('content');
+                let lastContent = contentArea.value;
 
-    # 内联JavaScript，实现客户端每秒检测内容变化
-    js = f"""
-    <script>
-    (function(){{
-        document.addEventListener('DOMContentLoaded', function() {{
-            const contentArea = document.getElementById('content');
-            let lastContent = contentArea.value;
+                // 自动保存内容 every second
+                setInterval(function() {{
+                    const currentContent = contentArea.value;
+                    if (currentContent !== lastContent) {{
+                        fetch('/update/{identifier}', {{
+                            method: 'POST',
+                            headers: {{
+                                'Content-Type': 'application/json'
+                            }},
+                            body: JSON.stringify({{ 'content': currentContent }})
+                        }})
+                        .then(response => response.json())
+                        .then(data => {{
+                            if (data.status === 'success') {{
+                                console.log('更新成功');
+                                lastContent = currentContent;
+                            }} else {{
+                                alert(data.message);
+                            }}
+                        }})
+                        .catch((error) => {{
+                            console.error('Error:', error);
+                        }});
+                    }}
+                }}, 1000); // 每秒检测一次
 
-            setInterval(function() {{
-                const currentContent = contentArea.value;
-                if (currentContent !== lastContent) {{
-                    fetch('/update/{identifier}', {{
-                        method: 'POST',
-                        headers: {{
-                            'Content-Type': 'application/json'
-                        }},
-                        body: JSON.stringify({{ 'content': currentContent }})
-                    }})
-                    .then(response => response.json())
-                    .then(data => {{
-                        if (data.status === 'success') {{
-                            console.log('更新成功');
-                            lastContent = currentContent;
-                        }} else {{
-                            alert(data.message);
-                        }}
-                    }})
-                    .catch((error) => {{
-                        console.error('Error:', error);
+                // 处理Share按钮点击
+                const shareButton = document.getElementById('shareButton');
+                if (shareButton) {{
+                    shareButton.addEventListener('click', function() {{
+                        fetch('/create_share/{identifier}', {{
+                            method: 'POST'
+                        }})
+                        .then(response => response.json())
+                        .then(data => {{
+                            if (data.status === 'success') {{
+                                const shareUrl = window.location.origin + data.share_url;
+                                window.open(shareUrl, '_blank');
+                            }} else {{
+                                alert(data.message);
+                            }}
+                        }})
+                        .catch((error) => {{
+                            console.error('Error:', error);
+                        }});
                     }});
                 }}
-            }}, 1000); // 每秒检测一次
-        }});
-    }})();
-    </script>
-    """
+            }});
+        }})();
+        </script>
+        """
+    else:
+        js = ""  # No JavaScript needed for read-only pages
 
     # 构建 flag 部分
-    flag = f'''
-    <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - {path}
-    '''
-    if read_only:
-        flag += " - ReadOnly"
+    if custom_flag:
+        flag = custom_flag
+    else:
+        flag = f'''
+        <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - {path}
+        '''
+        if read_only:
+            flag += " - ReadOnly"
 
     # 构建HTML
     html = f"""
@@ -527,7 +604,8 @@ def render_html(content, read_only=False, path='/', identifier=None):
     <body>
         <div class="stack">
             <div class="layer">
-                <textarea id="content" class="content" {'readonly' if read_only else ''} style="height:100%; width:100%;">{content}</textarea>
+                <textarea id="content" class="content" {'readonly' if read_only else ''} maxlength="100000" style="height:90%; width:100%;">{content}</textarea>
+                {'<button id="shareButton" style="margin-top:10px;">Share</button>' if not read_only else ''}
             </div>
         </div>
         <div class="flag">
