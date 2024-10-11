@@ -8,19 +8,23 @@ from datetime import datetime
 
 app = Flask(__name__)
 
+# 配置
 DATABASE = 'content.db'
 MAIN_TEXT_FILE = 'main.txt'
-PORT = 19998
+PORT = 6094
 META_FOLDER = 'meta'
 LOG_FILE = 'log.log'
 FAVICON_FILE = 'favicon.ico'
 
+# 正则表达式用于验证标识符（3-24 个字母或数字）
 ID_REGEX = re.compile(r'^[A-Za-z0-9]{3,24}$')
 
+# 禁用 Flask 默认的日志
 log = logging.getLogger('werkzeug')
 log.disabled = True
 app.logger.disabled = True
 
+# 设置自定义日志
 logger = logging.getLogger('custom_logger')
 logger.setLevel(logging.INFO)
 file_handler = logging.FileHandler(LOG_FILE)
@@ -28,6 +32,7 @@ formatter = logging.Formatter('%(message)s')
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
+# 初始化数据库
 def init_db():
     if not os.path.exists(DATABASE):
         conn = sqlite3.connect(DATABASE)
@@ -38,8 +43,7 @@ def init_db():
                 content TEXT NOT NULL
             )
         ''')
-        
-
+        # 插入一些初始数据（可根据需要修改）
         initial_data = [
             ('dqjl', 'hi y'),
         ]
@@ -50,6 +54,7 @@ def init_db():
     else:
         print("数据库已存在。")
 
+# 初始化 main.txt
 def init_main_txt():
     if not os.path.exists(MAIN_TEXT_FILE):
         with open(MAIN_TEXT_FILE, 'w', encoding='utf-8') as f:
@@ -58,12 +63,12 @@ def init_main_txt():
     else:
         print("main.txt 已存在。")
 
+# 确保 meta 文件夹和 bg.png 存在
 def init_meta():
     if not os.path.exists(META_FOLDER):
         os.makedirs(META_FOLDER)
         print(f"{META_FOLDER} 文件夹已创建。")
-    
-
+    # 检查 bg.png 是否存在，如果不存在，可以创建一个占位图片或提示用户添加
     bg_path = os.path.join(META_FOLDER, 'bg.png')
     if not os.path.exists(bg_path):
         try:
@@ -74,6 +79,7 @@ def init_meta():
         except ImportError:
             print("Pillow 未安装，无法创建占位图片。请手动添加 meta/bg.png。")
 
+# 初始化 favicon.ico
 def init_favicon():
     if not os.path.exists(FAVICON_FILE):
         try:
@@ -84,11 +90,13 @@ def init_favicon():
         except ImportError:
             print("Pillow 未安装，无法创建占位 favicon.ico。请手动添加 favicon.ico。")
 
+# 获取数据库连接
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     return conn
 
+# 获取内容
 def get_content(identifier):
     conn = get_db_connection()
     c = conn.cursor()
@@ -98,9 +106,9 @@ def get_content(identifier):
     if row:
         return row['content']
     else:
-        return ""  
+        return ""  # 返回空字符串而不是提示
 
-
+# 更新或插入内容
 def upsert_content(identifier, new_content):
     conn = get_db_connection()
     c = conn.cursor()
@@ -111,6 +119,7 @@ def upsert_content(identifier, new_content):
     conn.commit()
     conn.close()
 
+# 日志记录装饰器
 def log_request(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -123,12 +132,12 @@ def log_request(f):
         return response
     return decorated_function
 
+# 主路由，处理 /0, /1, /main, /index, /
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 @log_request
 def serve_content(path):
-    
-
+    # 处理主路由
     if path in ['', '0', '1', 'main', 'index']:
         try:
             with open(MAIN_TEXT_FILE, 'r', encoding='utf-8') as f:
@@ -138,28 +147,25 @@ def serve_content(path):
         display_path = '/' if path == '' else f'/{path}'
         return render_html(content, read_only=True, path=display_path)
     
-    
-
+    # 处理 /<id> 路由
     if ID_REGEX.fullmatch(path):
         identifier = path
         content = get_content(identifier)
         display_path = f'/{identifier}'
         return render_html(content, read_only=False, path=display_path, identifier=identifier)
     
-    
-
+    # 如果路由不匹配，返回 404
     return "404 Not Found", 404
 
+# 更新内容的API
 @app.route('/update/<identifier>', methods=['POST'])
 @log_request
 def update(identifier):
-    
-
+    # 验证标识符
     if not ID_REGEX.fullmatch(identifier):
         return jsonify({'status': 'error', 'message': '无效的标识符。'}), 400
     
-    
-
+    # 获取新内容
     data = request.get_json()
     if not data or 'content' not in data:
         return jsonify({'status': 'error', 'message': '缺少内容。'}), 400
@@ -168,29 +174,29 @@ def update(identifier):
     upsert_content(identifier, new_content)
     return jsonify({'status': 'success', 'message': '内容已更新。'})
 
+# 提供静态文件（如 /meta/bg.png）
 @app.route('/meta/<path:filename>')
 @log_request
 def meta_static(filename):
     return send_from_directory(META_FOLDER, filename)
 
+# 提供 favicon.ico
 @app.route('/favicon.ico')
 @log_request
 def favicon():
     if os.path.exists(FAVICON_FILE):
         return send_from_directory('.', FAVICON_FILE)
     else:
-        return "", 204  
+        return "", 204  # No Content
 
-
+# 渲染HTML页面
 def render_html(content, read_only=False, path='/', identifier=None):
-    
-
+    # 内联CSS
     css = """
     <style>
     @media screen {
       body {
-        background:url(/meta/bg.png) top left repeat 
-
+        background:url(/meta/bg.png) top left repeat #ebeef2;
         font-family:Helvetica,Tahoma,Arial,STXihei,华文细黑,microsoft yahei,微软雅黑,SimSun,宋体,Heiti,黑体,sans-serif;
         font-size:15px
       }
@@ -207,13 +213,10 @@ def render_html(content, read_only=False, path='/', identifier=None):
         right:-3px;
         top:-3px;
         bottom:1px;
-        background-color:
-
+        background-color:#fff;
         border-radius:3.456789px;
-        border:1px solid 
-
-        box-shadow:0 0 5px 0 
-
+        border:1px solid #ddd;
+        box-shadow:0 0 5px 0 #e4e4e4
       }
       .flag {
         position:fixed;
@@ -222,15 +225,13 @@ def render_html(content, read_only=False, path='/', identifier=None):
         bottom:1em;
         height:.8em;
         text-align:center;
-        color:
-
+        color:#aaa;
         font-size:14px
       }
       a:link,
       a:visited,
       a:active {
-        color:
-
+        color:#aaa;
         text-decoration:none;
         word-break:break-all;
         -webkit-tap-highlight-color:transparent
@@ -248,8 +249,7 @@ def render_html(content, read_only=False, path='/', identifier=None):
         box-sizing:border-box;
         border:none;
         padding:.7em .8em;
-        color:
-
+        color:#333;
         font-size:1.1em
       }
       .print {
@@ -266,8 +266,7 @@ def render_html(content, read_only=False, path='/', identifier=None):
       a:link,
       a:visited,
       a:active {
-        color:
-
+        color:#aaa;
         text-decoration:none;
         word-break:break-all;
         -webkit-tap-highlight-color:transparent
@@ -342,10 +341,8 @@ def render_html(content, read_only=False, path='/', identifier=None):
       font-style:italic
     }
     mark {
-      background-color:
-
-      color:
-
+      background-color:#ff0;
+      color:#000
     }
     small {
       font-size:80%
@@ -474,6 +471,7 @@ def render_html(content, read_only=False, path='/', identifier=None):
     </style>
     """
 
+    # 内联JavaScript，实现客户端每秒检测内容变化
     js = f"""
     <script>
     (function(){{
@@ -510,16 +508,14 @@ def render_html(content, read_only=False, path='/', identifier=None):
     </script>
     """
 
-    
-
+    # 构建 flag 部分
     flag = f'''
     <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - {path}
     '''
     if read_only:
         flag += " - ReadOnly"
 
-    
-
+    # 构建HTML
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -543,14 +539,13 @@ def render_html(content, read_only=False, path='/', identifier=None):
     """
     return Response(html, mimetype='text/html')
 
+# 启动服务器
 if __name__ == '__main__':
-    
-
+    # 初始化数据库和文件
     init_db()
     init_main_txt()
     init_meta()
     init_favicon()
 
-    
-
+    # 启动 Flask 服务器
     app.run(host='0.0.0.0', port=PORT, threaded=True)
