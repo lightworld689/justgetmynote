@@ -81,7 +81,7 @@ JustGetMyText/
 python server.py
 ```
 
-服务器将监听 `0.0.0.0:19998`。首次运行时，脚本将自动初始化数据库和必要的文件（如果它们不存在）。
+服务器将监听 `0.0.0.0:6094`。首次运行时，脚本将自动初始化数据库和必要的文件（如果它们不存在）。
 
 输出示例：
 
@@ -92,7 +92,7 @@ meta 文件夹已创建。
 meta/bg.png 已创建。请替换为您需要的背景图片。
 favicon.ico 已创建。请替换为您需要的 favicon.ico。
  * Serving Flask app 'server'
- * Running on http://0.0.0.0:19998/ (Press CTRL+C to quit)
+ * Running on http://0.0.0.0:6094/ (Press CTRL+C to quit)
 ```
 
 ## 访问内容
@@ -101,11 +101,11 @@ favicon.ico 已创建。请替换为您需要的 favicon.ico。
 
 访问以下路径将显示 `main.txt` 的内容，并以只读模式展示：
 
-- [http://localhost:19998/](http://localhost:19998/)
-- [http://localhost:19998/0](http://localhost:19998/0)
-- [http://localhost:19998/1](http://localhost:19998/1)
-- [http://localhost:19998/main](http://localhost:19998/main)
-- [http://localhost:19998/index](http://localhost:19998/index)
+- [http://localhost:6094/](http://localhost:6094/)
+- [http://localhost:6094/0](http://localhost:6094/0)
+- [http://localhost:6094/1](http://localhost:6094/1)
+- [http://localhost:6094/main](http://localhost:6094/main)
+- [http://localhost:6094/index](http://localhost:6094/index)
 
 下方将显示：
 
@@ -117,8 +117,8 @@ JustGetMyText - /path - ReadOnly
 
 访问以下路径将从 SQLite 数据库中获取对应标识符的内容，并以可编辑模式展示：
 
-- [http://localhost:19998/abcd](http://localhost:19998/abcd)
-- [http://localhost:19998/efgh](http://localhost:19998/efgh)
+- [http://localhost:6094/abcd](http://localhost:6094/abcd)
+- [http://localhost:6094/efgh](http://localhost:6094/efgh)
 
 下方将显示：
 
@@ -130,7 +130,7 @@ JustGetMyText - /abcd
 
 ### 网站图标
 
-确保 `favicon.ico` 存在于项目根目录，访问 [http://localhost:19998/favicon.ico](http://localhost:19998/favicon.ico) 将显示网站图标。
+确保 `favicon.ico` 存在于项目根目录，访问 [http://localhost:6094/favicon.ico](http://localhost:6094/favicon.ico) 将显示网站图标。
 
 ## 编辑与更新
 
