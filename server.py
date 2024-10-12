@@ -6,6 +6,8 @@ import logging
 from functools import wraps
 import secrets  # For generating secure random share IDs
 import html     # Import html module for escaping
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -16,6 +18,8 @@ PORT = 6094
 META_FOLDER = 'meta'
 LOG_FILE = 'log.log'
 FAVICON_FILE = 'favicon.ico'
+SETTINGS_FOLDER = 'settings'
+MAIN_SETTINGS_FILE = os.path.join(SETTINGS_FOLDER, 'main.txt')
 
 # 正则表达式用于验证标识符（3-24 个字母或数字）
 ID_REGEX = re.compile(r'^[A-Za-z0-9]{3,24}$')
@@ -33,6 +37,13 @@ file_handler = logging.FileHandler(LOG_FILE)
 formatter = logging.Formatter('%(message)s')
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
+
+# 缓存结构
+cache = {
+    'main_text': '',
+    'settings': {}
+}
+cache_lock = threading.Lock()
 
 # 初始化数据库
 def init_db():
@@ -101,6 +112,26 @@ def init_favicon():
             print(f"{FAVICON_FILE} 已创建。请替换为您需要的 favicon.ico。")
         except ImportError:
             print("Pillow 未安装，无法创建占位 favicon.ico。请手动添加 favicon.ico。")
+
+# 初始化 settings
+def init_settings():
+    if not os.path.exists(SETTINGS_FOLDER):
+        os.makedirs(SETTINGS_FOLDER)
+        print(f"{SETTINGS_FOLDER} 文件夹已创建。")
+    if not os.path.exists(MAIN_SETTINGS_FILE):
+        default_content = """# Change this to enter read-only mode and the user will not be able to modify anything.
+construction = false
+"""
+        with open(MAIN_SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            f.write(default_content)
+        print(f"{MAIN_SETTINGS_FILE} 已创建。")
+    else:
+        print(f"{MAIN_SETTINGS_FILE} 已存在。")
+
+# 读取 construction 模式（从缓存获取）
+def is_construction_mode():
+    with cache_lock:
+        return cache['settings'].get('construction', False)
 
 # 获取数据库连接
 def get_db_connection():
@@ -176,122 +207,8 @@ def log_request(f):
         return response
     return decorated_function
 
-# 主路由，处理 /0, /1, /main, /index, /share/<share_id>, /<id>, /
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-@log_request
-def serve_content(path):
-    # 处理主路由
-    if path in ['', '0', '1', 'main', 'index']:
-        try:
-            with open(MAIN_TEXT_FILE, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except FileNotFoundError:
-            content = ""
-        display_path = '/' if path == '' else f'/{path}'
-        return render_html(content, read_only=True, path=display_path)
-
-    # 处理 /share/<share_id> 路由
-    if path.startswith('share/'):
-        share_id = path.split('share/')[1]
-        if not SHARE_ID_REGEX.fullmatch(share_id):
-            return "Invalid Share ID", 400
-        content = get_content_by_share_id(share_id)
-        if not content:
-            return "Share ID not found", 404
-        flag = '''
-            <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - Shared with you - ReadOnly
-        '''
-        return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag)
-
-    # 处理 /<id> 路由
-    if ID_REGEX.fullmatch(path):
-        identifier = path
-        content = get_content(identifier)
-        display_path = f'/{identifier}'
-        return render_html(content or "", read_only=False, path=display_path, identifier=identifier)
-
-    # 如果路由不匹配，返回 404
-    return "404 Not Found", 404
-
-# 更新内容的API
-@app.route('/update/<identifier>', methods=['POST'])
-@log_request
-def update(identifier):
-    # 验证标识符
-    if not ID_REGEX.fullmatch(identifier):
-        return jsonify({'status': 'error', 'message': '无效的标识符。'}), 400
-
-    # 获取新内容
-    data = request.get_json()
-    if not data or 'content' not in data:
-        return jsonify({'status': 'error', 'message': '缺少内容。'}), 400
-
-    new_content = data['content']
-
-    # 检查内容长度
-    if len(new_content) > 100000:
-        return jsonify({'status': 'error', 'message': '内容长度超过100,000字符限制。'}), 400
-
-    try:
-        upsert_content(identifier, new_content)
-    except ValueError as ve:
-        return jsonify({'status': 'error', 'message': str(ve)}), 400
-
-    return jsonify({'status': 'success', 'message': '内容已更新。'})
-
-# 创建共享链接的API
-@app.route('/create_share/<identifier>', methods=['POST'])
-@log_request
-def create_share(identifier):
-    # 验证标识符
-    if not ID_REGEX.fullmatch(identifier):
-        return jsonify({'status': 'error', 'message': '无效的标识符。'}), 400
-
-    content = get_content(identifier)
-    if not content:
-        return jsonify({'status': 'error', 'message': '标识符不存在。'}), 404
-
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    # 检查是否已经存在 share_id
-    c.execute('SELECT share_id FROM contents WHERE id = ?', (identifier,))
-    row = c.fetchone()
-    if row and row['share_id']:
-        share_id = row['share_id']
-    else:
-        # 生成唯一的 share_id
-        share_id = generate_share_id()
-        try:
-            c.execute('UPDATE contents SET share_id = ? WHERE id = ?', (share_id, identifier))
-            conn.commit()
-        except sqlite3.IntegrityError:
-            conn.close()
-            return jsonify({'status': 'error', 'message': '生成的 share_id 冲突，请重试。'}), 500
-
-    conn.close()
-
-    share_url = f"/share/{share_id}"
-    return jsonify({'status': 'success', 'share_url': share_url})
-
-# 提供静态文件（如 /meta/bg.png）
-@app.route('/meta/<path:filename>')
-@log_request
-def meta_static(filename):
-    return send_from_directory(META_FOLDER, filename)
-
-# 提供 favicon.ico
-@app.route('/favicon.ico')
-@log_request
-def favicon():
-    if os.path.exists(FAVICON_FILE):
-        return send_from_directory('.', FAVICON_FILE)
-    else:
-        return "", 204  # No Content
-
 # 渲染HTML页面
-def render_html(content, read_only=False, path='/', identifier=None, custom_flag=None):
+def render_html(content, read_only=False, path='/', identifier=None, custom_flag=None, construction_mode=False):
     # 内联CSS
     css = """
     <style>
@@ -578,7 +495,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     """
 
     # 内联JavaScript，实现客户端每秒检测内容变化，并处理分享按钮
-    if not read_only and identifier:
+    if not read_only and identifier and not construction_mode:
         js = f"""
         <script>
         (function(){{
@@ -638,7 +555,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         </script>
         """
     else:
-        js = ""  # No JavaScript needed for read-only pages
+        js = ""  # No JavaScript needed for read-only pages or construction mode
 
     # 构建 flag 部分
     if custom_flag:
@@ -651,6 +568,10 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         '''
         if read_only:
             flag += " - ReadOnly"
+
+    # 如果是维护模式，添加额外的信息
+    if construction_mode:
+        flag += " - ReadOnly - ReadOnly is about to be restored due to construction and website may be temporarily offline"
 
     # 构建HTML
     # 使用html.escape(content)确保内容安全
@@ -666,18 +587,188 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     <body>
         <div class="stack">
             <div class="layer">
-                <textarea id="content" class="content" {'readonly' if read_only else ''} maxlength="100000" style="height:90%; width:100%;">{escaped_content}</textarea>
-                {'<button id="shareButton" style="margin-top:0px;">Share</button>' if not read_only else ''}
+                <textarea id="content" class="content" {'readonly' if read_only or construction_mode else ''} maxlength="100000" style="height:90%; width:100%;">{escaped_content}</textarea>
+                {'<button id="shareButton" style="margin-top:0px;">Share</button>' if not read_only and not construction_mode else ''}
             </div>
         </div>
         <div class="flag">
             {flag}
         </div>
-        {'' if read_only else js}
+        {'' if read_only or construction_mode else js}
     </body>
     </html>
     """
     return Response(html_content, mimetype='text/html')
+
+# 主路由，处理 /0, /1, /main, /index, /share/<share_id>, /<id>, /
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+@log_request
+def serve_content(path):
+    construction_mode = is_construction_mode()
+
+    # 处理主路由
+    if path in ['', '0', '1', 'main', 'index']:
+        content = cache['main_text']
+        display_path = '/' if path == '' else f'/{path}'
+        # 在维护模式下，页面仍然是只读的
+        return render_html(content, read_only=True, path=display_path, construction_mode=construction_mode)
+
+    # 处理 /share/<share_id> 路由
+    if path.startswith('share/'):
+        share_id = path.split('share/')[1]
+        if not SHARE_ID_REGEX.fullmatch(share_id):
+            return "Invalid Share ID", 400
+        content = get_content_by_share_id(share_id)
+        if not content:
+            return "Share ID not found", 404
+        flag = '''
+            <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - Shared with you - ReadOnly
+        '''
+        if construction_mode:
+            flag += " - ReadOnly - ReadOnly is about to be restored due to construction and website may be temporarily offline"
+        return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag, construction_mode=construction_mode)
+
+    # 处理 /<id> 路由
+    if ID_REGEX.fullmatch(path):
+        identifier = path
+        content = get_content(identifier)
+        display_path = f'/{identifier}'
+        # 如果处于维护模式，将页面设置为只读
+        read_only = construction_mode
+        return render_html(content or "", read_only=read_only, path=display_path, identifier=identifier, construction_mode=construction_mode)
+
+    # 如果路由不匹配，返回 404
+    return "404 Not Found", 404
+
+# 更新内容的API
+@app.route('/update/<identifier>', methods=['POST'])
+@log_request
+def update(identifier):
+    construction_mode = is_construction_mode()
+    if construction_mode:
+        return jsonify({'status': 'error', 'message': 'The site is under maintenance and content cannot be modified.'}), 503
+
+    # 验证标识符
+    if not ID_REGEX.fullmatch(identifier):
+        return jsonify({'status': 'error', 'message': 'Invalid identifier.'}), 400
+
+    # 获取新内容
+    data = request.get_json()
+    if not data or 'content' not in data:
+        return jsonify({'status': 'error', 'message': 'Lack of content.'}), 400
+
+    new_content = data['content']
+
+    # 检查内容长度
+    if len(new_content) > 100000:
+        return jsonify({'status': 'error', 'message': 'Content length exceeds the 100,000 character limit.'}), 400
+
+    try:
+        upsert_content(identifier, new_content)
+    except ValueError as ve:
+        return jsonify({'status': 'error', 'message': str(ve)}), 400
+
+    # 如果更新的是 main.txt，对应缓存也需要更新
+    if identifier == 'main':
+        with cache_lock:
+            cache['main_text'] = new_content
+
+    return jsonify({'status': 'success'})
+
+# 创建共享链接的API
+@app.route('/create_share/<identifier>', methods=['POST'])
+@log_request
+def create_share(identifier):
+    construction_mode = is_construction_mode()
+    if construction_mode:
+        return jsonify({'status': 'error', 'message': 'The site is under maintenance and no shared links can be created.'}), 503
+
+    # 验证标识符
+    if not ID_REGEX.fullmatch(identifier):
+        return jsonify({'status': 'error', 'message': 'Invalid identifier.'}), 400
+
+    content = get_content(identifier)
+    if not content:
+        return jsonify({'status': 'error', 'message': 'The identifier does not exist.'}), 404
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # 检查是否已经存在 share_id
+    c.execute('SELECT share_id FROM contents WHERE id = ?', (identifier,))
+    row = c.fetchone()
+    if row and row['share_id']:
+        share_id = row['share_id']
+    else:
+        # 生成唯一的 share_id
+        share_id = generate_share_id()
+        try:
+            c.execute('UPDATE contents SET share_id = ? WHERE id = ?', (share_id, identifier))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            return jsonify({'status': 'error', 'message': '生成的 share_id 冲突，请重试。'}), 500
+
+    conn.close()
+
+    share_url = f"/share/{share_id}"
+    return jsonify({'status': 'success', 'share_url': share_url})
+
+# 提供静态文件（如 /meta/bg.png）
+@app.route('/meta/<path:filename>')
+@log_request
+def meta_static(filename):
+    return send_from_directory(META_FOLDER, filename)
+
+# 提供 favicon.ico
+@app.route('/favicon.ico')
+@log_request
+def favicon():
+    if os.path.exists(FAVICON_FILE):
+        return send_from_directory('.', FAVICON_FILE)
+    else:
+        return "", 204  # No Content
+
+# 缓存更新线程函数
+def update_cache():
+    while True:
+        try:
+            # 更新 main.txt
+            if os.path.exists(MAIN_TEXT_FILE):
+                with open(MAIN_TEXT_FILE, 'r', encoding='utf-8') as f:
+                    main_text = f.read()
+                with cache_lock:
+                    cache['main_text'] = main_text
+            else:
+                with cache_lock:
+                    cache['main_text'] = ""
+
+            # 更新 settings/main.txt
+            if os.path.exists(MAIN_SETTINGS_FILE):
+                with open(MAIN_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    settings = {}
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('#') or not line:
+                            continue
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip().lower()
+                            value = value.strip().lower()
+                            if key == 'construction':
+                                settings['construction'] = (value == 'true')
+                    with cache_lock:
+                        cache['settings'] = settings
+            else:
+                with cache_lock:
+                    cache['settings'] = {}
+# 输出多了容易撑爆控制台
+#            print("缓存已更新。")
+        except Exception as e:
+            print(f"缓存更新时出错: {e}")
+        # 等待10秒
+        time.sleep(10)
 
 # 启动服务器
 if __name__ == '__main__':
@@ -686,6 +777,40 @@ if __name__ == '__main__':
     init_main_txt()
     init_meta()
     init_favicon()
+    init_settings()
+
+    # 初次加载缓存
+    try:
+        # 读取 main.txt
+        if os.path.exists(MAIN_TEXT_FILE):
+            with open(MAIN_TEXT_FILE, 'r', encoding='utf-8') as f:
+                cache['main_text'] = f.read()
+        else:
+            cache['main_text'] = ""
+
+        # 读取 settings/main.txt
+        if os.path.exists(MAIN_SETTINGS_FILE):
+            with open(MAIN_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                settings = {}
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('#') or not line:
+                        continue
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip().lower()
+                        value = value.strip().lower()
+                        if key == 'construction':
+                            settings['construction'] = (value == 'true')
+                cache['settings'] = settings
+        else:
+            cache['settings'] = {}
+    except Exception as e:
+        print(f"初始化缓存时出错: {e}")
+
+    # 启动缓存更新线程
+    cache_thread = threading.Thread(target=update_cache, daemon=True)
+    cache_thread.start()
 
     # 启动 Flask 服务器
     app.run(host='0.0.0.0', port=PORT, threaded=True)
