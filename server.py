@@ -43,7 +43,8 @@ logger.addHandler(file_handler)
 cache = {
     'main_text': '',
     'settings': {},
-    'contents': {}  # 新增：用于缓存所有内容
+    'contents': {},        # id -> content
+    'share_contents': {}   # share_id -> content  # 新增：用于缓存共享内容
 }
 cache_lock = threading.Lock()
 
@@ -148,12 +149,18 @@ def get_db_connection():
 def load_all_contents_to_cache():
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT id, content FROM contents')
+    c.execute('SELECT id, content, share_id FROM contents')
     rows = c.fetchall()
     conn.close()
-    contents = {row['id']: row['content'] for row in rows}
+    contents = {}
+    share_contents = {}
+    for row in rows:
+        contents[row['id']] = row['content']
+        if row['share_id']:
+            share_contents[row['share_id']] = row['content']
     with cache_lock:
         cache['contents'] = contents
+        cache['share_contents'] = share_contents  # 更新 share_contents 缓存
 
 # 生成唯一的16字符十六进制共享ID
 def generate_share_id():
@@ -173,15 +180,8 @@ def share_id_exists(share_id):
 
 # 获取内容通过 share_id（从缓存读取）
 def get_content_by_share_id(share_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('SELECT content FROM contents WHERE share_id = ?', (share_id,))
-    row = c.fetchone()
-    conn.close()
-    if row:
-        return row['content']
-    else:
-        return None
+    with cache_lock:
+        return cache['share_contents'].get(share_id, None)
 
 # 日志记录装饰器
 def log_request(f):
@@ -650,7 +650,7 @@ def serve_content(path):
         flag = '''
             <a href="https://github.com/lightworld689/justgetmynote" target="_blank">JustGetMyNote</a> - Shared with you - ReadOnly
         '''
-        if construction_mode and 1==1:
+        if construction_mode:
             flag += " - ReadOnly is about to be restored due to construction and website may be temporarily offline"
         return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag, construction_mode=construction_mode)
 
@@ -699,6 +699,16 @@ def update(identifier):
         if identifier == 'main':
             cache['main_text'] = new_content
 
+        # 检查是否有对应的 share_id，并更新 share_contents 缓存
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('SELECT share_id FROM contents WHERE id = ?', (identifier,))
+        row = c.fetchone()
+        conn.close()
+        if row and row['share_id']:
+            share_id = row['share_id']
+            cache['share_contents'][share_id] = new_content
+
     return jsonify({'status': 'success'})
 
 # 创建共享链接的API
@@ -738,6 +748,10 @@ def create_share(identifier):
             return jsonify({'status': 'error', 'message': '生成的 share_id 冲突，请重试。'}), 500
 
     conn.close()
+
+    # 更新缓存中的 share_contents
+    with cache_lock:
+        cache['share_contents'][share_id] = content
 
     share_url = f"/share/{share_id}"
     return jsonify({'status': 'success', 'share_url': share_url})
