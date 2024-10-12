@@ -6,6 +6,7 @@ import logging
 from functools import wraps
 from datetime import datetime
 import secrets  # For generating secure random share IDs
+import html     # Import html module for escaping
 
 app = Flask(__name__)
 
@@ -164,7 +165,7 @@ def serve_content(path):
         content = get_content(share_id)
         if not content:
             return "Share ID not found", 404
-        flag = f'''
+        flag = r'''
             <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - Shared with you - ReadOnly
         '''
         return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag)
@@ -532,7 +533,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
                 setInterval(function() {{
                     const currentContent = contentArea.value;
                     if (currentContent !== lastContent) {{
-                        fetch('/update/{identifier}', {{
+                        fetch('/update/{html.escape(identifier)}', {{
                             method: 'POST',
                             headers: {{
                                 'Content-Type': 'application/json'
@@ -558,7 +559,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
                 const shareButton = document.getElementById('shareButton');
                 if (shareButton) {{
                     shareButton.addEventListener('click', function() {{
-                        fetch('/create_share/{identifier}', {{
+                        fetch('/create_share/{html.escape(identifier)}', {{
                             method: 'POST'
                         }})
                         .then(response => response.json())
@@ -586,14 +587,18 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     if custom_flag:
         flag = custom_flag
     else:
+        # 使用html.escape确保path安全
+        escaped_path = html.escape(path)
         flag = f'''
-        <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - {path}
+        <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - {escaped_path}
         '''
         if read_only:
             flag += " - ReadOnly"
 
     # 构建HTML
-    html = f"""
+    # 使用html.escape(content)确保内容安全
+    escaped_content = html.escape(content)
+    html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -604,7 +609,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     <body>
         <div class="stack">
             <div class="layer">
-                <textarea id="content" class="content" {'readonly' if read_only else ''} maxlength="100000" style="height:90%; width:100%;">{content}</textarea>
+                <textarea id="content" class="content" {'readonly' if read_only else ''} maxlength="100000" style="height:90%; width:100%;">{escaped_content}</textarea>
                 {'<button id="shareButton" style="margin-top:10px;">Share</button>' if not read_only else ''}
             </div>
         </div>
@@ -615,7 +620,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     </body>
     </html>
     """
-    return Response(html, mimetype='text/html')
+    return Response(html_content, mimetype='text/html')
 
 # 启动服务器
 if __name__ == '__main__':
