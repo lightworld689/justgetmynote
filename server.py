@@ -582,7 +582,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         # 使用html.escape确保path安全
         escaped_path = html.escape(path)
         flag = f'''
-        <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - {escaped_path}
+        <a href="https://github.com/lightworld689/justgetmynote" target="_blank">JustGetMyNote</a> - {escaped_path}
         '''
         if read_only:
             flag += " - ReadOnly"
@@ -604,7 +604,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>JustGetMyText</title>
+        <title>JustGetMyNote</title>
         {css}
     </head>
     <body>
@@ -648,7 +648,7 @@ def serve_content(path):
         if not content:
             return "Share ID not found", 404
         flag = '''
-            <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - Shared with you - ReadOnly
+            <a href="https://github.com/lightworld689/justgetmynote" target="_blank">JustGetMyNote</a> - Shared with you - ReadOnly
         '''
         if construction_mode:
             flag += " - ReadOnly - ReadOnly is about to be restored due to construction and website may be temporarily offline"

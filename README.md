@@ -1,6 +1,6 @@
-# JustGetMyText 服务器
+# JustGetMyNote 服务器
 
-**JustGetMyText** 是一个基于 Flask 框架的简易服务器，用于管理和展示文本内容。它支持从 SQLite 数据库或 `main.txt` 文件中获取内容，并提供一个前端界面供用户查看和编辑内容。所有请求都会被记录到日志文件中，便于追踪和管理。此外，服务器还支持生成共享链接以及维护模式，确保在需要时能够限制内容的修改和访问。css以及部分功能借鉴[note.ms](https://note.ms)。
+**JustGetMyNote** 是一个基于 Flask 框架的简易服务器，用于管理和展示文本内容。它支持从 SQLite 数据库或 `main.txt` 文件中获取内容，并提供一个前端界面供用户查看和编辑内容。所有请求都会被记录到日志文件中，便于追踪和管理。此外，服务器还支持生成共享链接以及维护模式，确保在需要时能够限制内容的修改和访问。css以及部分功能借鉴[note.ms](https://note.ms)。
 
 **现在可以与他人共享只读笔记了！**
 
@@ -52,7 +52,7 @@
 ## 项目结构
 
 ```
-JustGetMyText/
+JustGetMyNote/
 │
 ├── server.py                # 服务器端代码
 ├── main.txt                 # 主文本文件（自动创建）
@@ -78,8 +78,8 @@ JustGetMyText/
 1. **克隆仓库**：
 
    ```bash
-   git clone https://github.com/lightworld689/JustGetMyText.git
-   cd JustGetMyText
+   git clone https://github.com/lightworld689/JustGetMyNote.git
+   cd JustGetMyNote
    ```
 
 2. **创建并激活虚拟环境（可选，但推荐）**：
@@ -141,7 +141,7 @@ settings/main.txt 已创建。
 下方将显示：
 
 ```
-JustGetMyText - /path - ReadOnly
+JustGetMyNote - /path - ReadOnly
 ```
 
 ### 可编辑内容
@@ -154,7 +154,7 @@ JustGetMyText - /path - ReadOnly
 下方将显示：
 
 ```
-JustGetMyText - /abcd
+JustGetMyNote - /abcd
 ```
 
 如果标识符不存在，页面将显示空白，允许通过编辑框创建新内容。
@@ -168,7 +168,7 @@ JustGetMyText - /abcd
 共享链接示例：
 
 ```
-JustGetMyText - Shared with you - ReadOnly
+JustGetMyNote - Shared with you - ReadOnly
 ```
 
 ## 编辑与更新
@@ -287,6 +287,6 @@ construction = false
 
 ---
 
-**感谢使用 JustGetMyText！**
+**感谢使用 JustGetMyNote！**
 
-如有任何问题或建议，欢迎提交 [issue](https://github.com/lightworld689/justgetmytext/issues) 或联系作者。
+如有任何问题或建议，欢迎提交 [issue](https://github.com/lightworld689/JustGetMyNote/issues) 或联系作者。
