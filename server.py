@@ -8,6 +8,7 @@ import secrets  # For generating secure random share IDs
 import html     # Import html module for escaping
 import threading
 import time
+import queue  # Import queue module for write tasks
 
 app = Flask(__name__)
 
@@ -41,9 +42,13 @@ logger.addHandler(file_handler)
 # 缓存结构
 cache = {
     'main_text': '',
-    'settings': {}
+    'settings': {},
+    'contents': {}  # 新增：用于缓存所有内容
 }
 cache_lock = threading.Lock()
+
+# 写入队列
+write_queue = queue.Queue()
 
 # 初始化数据库
 def init_db():
@@ -139,40 +144,16 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# 获取内容，支持通过 id 或 share_id 获取
-def get_content(identifier, by_share=False):
+# 获取所有内容并更新缓存
+def load_all_contents_to_cache():
     conn = get_db_connection()
     c = conn.cursor()
-    if by_share:
-        c.execute('SELECT content FROM contents WHERE share_id = ?', (identifier,))
-    else:
-        c.execute('SELECT content FROM contents WHERE id = ?', (identifier,))
-    row = c.fetchone()
+    c.execute('SELECT id, content FROM contents')
+    rows = c.fetchall()
     conn.close()
-    if row:
-        return row['content']
-    else:
-        return None  # 返回 None 表示未找到
-
-# 更新或插入内容，不修改 share_id
-def upsert_content(identifier, new_content):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        # 尝试更新已有的内容
-        c.execute('''
-            UPDATE contents SET content = ? WHERE id = ?
-        ''', (new_content, identifier))
-        if c.rowcount == 0:
-            # 如果没有更新到任何行，说明标识符不存在，插入新的记录
-            c.execute('''
-                INSERT INTO contents (id, content) VALUES (?, ?)
-            ''', (identifier, new_content))
-        conn.commit()
-    except sqlite3.IntegrityError as e:
-        raise ValueError(f"数据库错误: {e}")
-    finally:
-        conn.close()
+    contents = {row['id']: row['content'] for row in rows}
+    with cache_lock:
+        cache['contents'] = contents
 
 # 生成唯一的16字符十六进制共享ID
 def generate_share_id():
@@ -190,9 +171,17 @@ def share_id_exists(share_id):
     conn.close()
     return row is not None
 
-# 获取内容通过 share_id
+# 获取内容通过 share_id（从缓存读取）
 def get_content_by_share_id(share_id):
-    return get_content(share_id, by_share=True)
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('SELECT content FROM contents WHERE share_id = ?', (share_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return row['content']
+    else:
+        return None
 
 # 日志记录装饰器
 def log_request(f):
@@ -609,7 +598,8 @@ def serve_content(path):
 
     # 处理主路由
     if path in ['', '0', '1', 'main', 'index']:
-        content = cache['main_text']
+        with cache_lock:
+            content = cache['main_text']
         display_path = '/' if path == '' else f'/{path}'
         # 在维护模式下，页面仍然是只读的
         return render_html(content, read_only=True, path=display_path, construction_mode=construction_mode)
@@ -632,11 +622,12 @@ def serve_content(path):
     # 处理 /<id> 路由
     if ID_REGEX.fullmatch(path):
         identifier = path
-        content = get_content(identifier)
+        with cache_lock:
+            content = cache['contents'].get(identifier, "")
         display_path = f'/{identifier}'
         # 如果处于维护模式，将页面设置为只读
         read_only = construction_mode
-        return render_html(content or "", read_only=read_only, path=display_path, identifier=identifier, construction_mode=construction_mode)
+        return render_html(content, read_only=read_only, path=display_path, identifier=identifier, construction_mode=construction_mode)
 
     # 如果路由不匹配，返回 404
     return "404 Not Found", 404
@@ -664,14 +655,13 @@ def update(identifier):
     if len(new_content) > 100000:
         return jsonify({'status': 'error', 'message': 'Content length exceeds the 100,000 character limit.'}), 400
 
-    try:
-        upsert_content(identifier, new_content)
-    except ValueError as ve:
-        return jsonify({'status': 'error', 'message': str(ve)}), 400
+    # 将写入任务加入队列
+    write_queue.put((identifier, new_content))
 
-    # 如果更新的是 main.txt，对应缓存也需要更新
-    if identifier == 'main':
-        with cache_lock:
+    # 立即更新缓存
+    with cache_lock:
+        cache['contents'][identifier] = new_content
+        if identifier == 'main':
             cache['main_text'] = new_content
 
     return jsonify({'status': 'success'})
@@ -688,8 +678,10 @@ def create_share(identifier):
     if not ID_REGEX.fullmatch(identifier):
         return jsonify({'status': 'error', 'message': 'Invalid identifier.'}), 400
 
-    content = get_content(identifier)
-    if not content:
+    with cache_lock:
+        content = cache['contents'].get(identifier, None)
+
+    if content is None:
         return jsonify({'status': 'error', 'message': 'The identifier does not exist.'}), 404
 
     conn = get_db_connection()
@@ -763,10 +755,44 @@ def update_cache():
             else:
                 with cache_lock:
                     cache['settings'] = {}
-# 输出多了容易撑爆控制台
-#            print("缓存已更新。")
+
+            # 更新所有内容到缓存
+            load_all_contents_to_cache()
+            # 输出多了容易撑爆控制台
+            # print("缓存已更新。")
         except Exception as e:
             print(f"缓存更新时出错: {e}")
+        # 等待10秒
+        time.sleep(10)
+
+# 写入队列处理线程函数
+def process_write_queue():
+    while True:
+        try:
+            writes = []
+            while not write_queue.empty():
+                write_task = write_queue.get_nowait()
+                writes.append(write_task)
+            if writes:
+                conn = get_db_connection()
+                c = conn.cursor()
+                for identifier, new_content in writes:
+                    try:
+                        # 尝试更新已有的内容
+                        c.execute('''
+                            UPDATE contents SET content = ? WHERE id = ?
+                        ''', (new_content, identifier))
+                        if c.rowcount == 0:
+                            # 如果没有更新到任何行，说明标识符不存在，插入新的记录
+                            c.execute('''
+                                INSERT INTO contents (id, content) VALUES (?, ?)
+                            ''', (identifier, new_content))
+                    except sqlite3.IntegrityError as e:
+                        logger.error(f"数据库错误: {e}")
+                conn.commit()
+                conn.close()
+        except Exception as e:
+            logger.error(f"处理写入队列时出错: {e}")
         # 等待10秒
         time.sleep(10)
 
@@ -805,12 +831,19 @@ if __name__ == '__main__':
                 cache['settings'] = settings
         else:
             cache['settings'] = {}
+
+        # 加载所有内容到缓存
+        load_all_contents_to_cache()
     except Exception as e:
         print(f"初始化缓存时出错: {e}")
 
     # 启动缓存更新线程
     cache_thread = threading.Thread(target=update_cache, daemon=True)
     cache_thread.start()
+
+    # 启动写入队列处理线程
+    write_thread = threading.Thread(target=process_write_queue, daemon=True)
+    write_thread.start()
 
     # 启动 Flask 服务器
     app.run(host='0.0.0.0', port=PORT, threaded=True)
