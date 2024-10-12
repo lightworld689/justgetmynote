@@ -589,7 +589,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
 
     # 如果是维护模式，添加额外的信息
     if construction_mode:
-        flag += " - ReadOnly - ReadOnly is about to be restored due to construction and website may be temporarily offline"
+        flag += " - ReadOnly is about to be restored due to construction and website may be temporarily offline"
 
     # 如果需要，添加保存成功的提示元素
     save_success_div = '''
@@ -650,8 +650,8 @@ def serve_content(path):
         flag = '''
             <a href="https://github.com/lightworld689/justgetmynote" target="_blank">JustGetMyNote</a> - Shared with you - ReadOnly
         '''
-        if construction_mode:
-            flag += " - ReadOnly - ReadOnly is about to be restored due to construction and website may be temporarily offline"
+        if construction_mode and 1==1:
+            flag += " - ReadOnly is about to be restored due to construction and website may be temporarily offline"
         return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag, construction_mode=construction_mode)
 
     # 处理 /<id> 路由
@@ -665,7 +665,7 @@ def serve_content(path):
         return render_html(content, read_only=read_only, path=display_path, identifier=identifier, construction_mode=construction_mode)
 
     # 如果路由不匹配，返回 404
-    return "404 Not Found", 404
+    return "404 Not Found<br />Maybe try 3-24 digit letters and numbers?", 404
 
 # 更新内容的API
 @app.route('/update/<identifier>', methods=['POST'])
