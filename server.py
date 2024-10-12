@@ -4,7 +4,6 @@ import re
 import os
 import logging
 from functools import wraps
-from datetime import datetime
 import secrets  # For generating secure random share IDs
 import html     # Import html module for escaping
 
@@ -37,25 +36,35 @@ logger.addHandler(file_handler)
 
 # 初始化数据库
 def init_db():
-    if not os.path.exists(DATABASE):
-        conn = sqlite3.connect(DATABASE)
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS contents (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL
-            )
-        ''')
-        # 插入一些初始数据（可根据需要修改）
-        initial_data = [
-            ('dqjl', 'hi y'),
-        ]
-        c.executemany('INSERT OR IGNORE INTO contents (id, content) VALUES (?, ?)', initial_data)
-        conn.commit()
-        conn.close()
-        print("数据库已初始化。")
-    else:
-        print("数据库已存在。")
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row  # Set row_factory to access columns by name
+    c = conn.cursor()
+
+    # 创建 contents 表，如果不存在，添加 share_id 列
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contents (
+            id TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            share_id TEXT UNIQUE
+        )
+    ''')
+
+    # 插入一些初始数据（可根据需要修改）
+    initial_data = [
+        ('dqjl', 'hi y'),
+    ]
+
+    for identifier, content in initial_data:
+        # 检查是否已经存在该标识符
+        c.execute('SELECT share_id FROM contents WHERE id = ?', (identifier,))
+        row = c.fetchone()
+        if not row:
+            # 插入初始数据，没有 share_id
+            c.execute('INSERT INTO contents (id, content) VALUES (?, ?)', (identifier, content))
+
+    conn.commit()
+    conn.close()
+    print("数据库已初始化。")
 
 # 初始化 main.txt
 def init_main_txt():
@@ -99,35 +108,60 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# 获取内容
-def get_content(identifier):
+# 获取内容，支持通过 id 或 share_id 获取
+def get_content(identifier, by_share=False):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT content FROM contents WHERE id = ?', (identifier,))
+    if by_share:
+        c.execute('SELECT content FROM contents WHERE share_id = ?', (identifier,))
+    else:
+        c.execute('SELECT content FROM contents WHERE id = ?', (identifier,))
     row = c.fetchone()
     conn.close()
     if row:
         return row['content']
     else:
-        return ""  # 返回空字符串而不是提示
+        return None  # 返回 None 表示未找到
 
-# 更新或插入内容
+# 更新或插入内容，不修改 share_id
 def upsert_content(identifier, new_content):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''
-        INSERT INTO contents (id, content) VALUES (?, ?)
-        ON CONFLICT(id) DO UPDATE SET content=excluded.content
-    ''', (identifier, new_content))
-    conn.commit()
-    conn.close()
+    try:
+        # 尝试更新已有的内容
+        c.execute('''
+            UPDATE contents SET content = ? WHERE id = ?
+        ''', (new_content, identifier))
+        if c.rowcount == 0:
+            # 如果没有更新到任何行，说明标识符不存在，插入新的记录
+            c.execute('''
+                INSERT INTO contents (id, content) VALUES (?, ?)
+            ''', (identifier, new_content))
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        raise ValueError(f"数据库错误: {e}")
+    finally:
+        conn.close()
 
 # 生成唯一的16字符十六进制共享ID
 def generate_share_id():
     while True:
         share_id = secrets.token_hex(8)  # 16 characters
-        if not get_content(share_id):
+        if not share_id_exists(share_id):
             return share_id
+
+# 检查 share_id 是否存在
+def share_id_exists(share_id):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('SELECT id FROM contents WHERE share_id = ?', (share_id,))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+# 获取内容通过 share_id
+def get_content_by_share_id(share_id):
+    return get_content(share_id, by_share=True)
 
 # 日志记录装饰器
 def log_request(f):
@@ -156,27 +190,27 @@ def serve_content(path):
             content = ""
         display_path = '/' if path == '' else f'/{path}'
         return render_html(content, read_only=True, path=display_path)
-    
+
     # 处理 /share/<share_id> 路由
     if path.startswith('share/'):
         share_id = path.split('share/')[1]
         if not SHARE_ID_REGEX.fullmatch(share_id):
             return "Invalid Share ID", 400
-        content = get_content(share_id)
+        content = get_content_by_share_id(share_id)
         if not content:
             return "Share ID not found", 404
-        flag = r'''
+        flag = '''
             <a href="https://github.com/lightworld689/justgetmytext" target="_blank">JustGetMyText</a> - Shared with you - ReadOnly
         '''
         return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag)
-    
+
     # 处理 /<id> 路由
     if ID_REGEX.fullmatch(path):
         identifier = path
         content = get_content(identifier)
         display_path = f'/{identifier}'
-        return render_html(content, read_only=False, path=display_path, identifier=identifier)
-    
+        return render_html(content or "", read_only=False, path=display_path, identifier=identifier)
+
     # 如果路由不匹配，返回 404
     return "404 Not Found", 404
 
@@ -187,19 +221,23 @@ def update(identifier):
     # 验证标识符
     if not ID_REGEX.fullmatch(identifier):
         return jsonify({'status': 'error', 'message': '无效的标识符。'}), 400
-    
+
     # 获取新内容
     data = request.get_json()
     if not data or 'content' not in data:
         return jsonify({'status': 'error', 'message': '缺少内容。'}), 400
-    
+
     new_content = data['content']
-    
+
     # 检查内容长度
     if len(new_content) > 100000:
         return jsonify({'status': 'error', 'message': '内容长度超过100,000字符限制。'}), 400
-    
-    upsert_content(identifier, new_content)
+
+    try:
+        upsert_content(identifier, new_content)
+    except ValueError as ve:
+        return jsonify({'status': 'error', 'message': str(ve)}), 400
+
     return jsonify({'status': 'success', 'message': '内容已更新。'})
 
 # 创建共享链接的API
@@ -209,17 +247,31 @@ def create_share(identifier):
     # 验证标识符
     if not ID_REGEX.fullmatch(identifier):
         return jsonify({'status': 'error', 'message': '无效的标识符。'}), 400
-    
+
     content = get_content(identifier)
     if not content:
         return jsonify({'status': 'error', 'message': '标识符不存在。'}), 404
-    
-    # 生成唯一的共享ID
-    share_id = generate_share_id()
-    
-    # 插入共享内容
-    upsert_content(share_id, content)
-    
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # 检查是否已经存在 share_id
+    c.execute('SELECT share_id FROM contents WHERE id = ?', (identifier,))
+    row = c.fetchone()
+    if row and row['share_id']:
+        share_id = row['share_id']
+    else:
+        # 生成唯一的 share_id
+        share_id = generate_share_id()
+        try:
+            c.execute('UPDATE contents SET share_id = ? WHERE id = ?', (share_id, identifier))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            return jsonify({'status': 'error', 'message': '生成的 share_id 冲突，请重试。'}), 500
+
+    conn.close()
+
     share_url = f"/share/{share_id}"
     return jsonify({'status': 'success', 'share_url': share_url})
 
@@ -303,6 +355,11 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
       }
       .print {
         display:none
+      }
+      button {
+        padding: 0.5em 1em;
+        font-size: 1em;
+        cursor: pointer;
       }
     }
     @media print {
@@ -519,9 +576,9 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     }
     </style>
     """
-    
+
     # 内联JavaScript，实现客户端每秒检测内容变化，并处理分享按钮
-    if not read_only:
+    if not read_only and identifier:
         js = f"""
         <script>
         (function(){{
@@ -610,7 +667,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         <div class="stack">
             <div class="layer">
                 <textarea id="content" class="content" {'readonly' if read_only else ''} maxlength="100000" style="height:90%; width:100%;">{escaped_content}</textarea>
-                {'<button id="shareButton" style="margin-top:10px;">Share</button>' if not read_only else ''}
+                {'<button id="shareButton" style="margin-top:0px;">Share</button>' if not read_only else ''}
             </div>
         </div>
         <div class="flag">
