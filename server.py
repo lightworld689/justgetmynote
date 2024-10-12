@@ -267,6 +267,19 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         font-size: 1em;
         cursor: pointer;
       }
+      /* 新增：保存成功提示样式 */
+      .save-success {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background-color: #4CAF50; /* 绿色背景 */
+        color: white;
+        padding: 10px 20px;
+        border-radius: 5px;
+        opacity: 0;
+        transition: opacity 0.5s ease-in-out;
+        z-index: 1000;
+      }
     }
     @media print {
       .container,
@@ -508,6 +521,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
                             if (data.status === 'success') {{
                                 console.log('更新成功');
                                 lastContent = currentContent;
+                                showSaveSuccess();
                             }} else {{
                                 alert(data.message);
                             }}
@@ -539,6 +553,21 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
                         }});
                     }});
                 }}
+
+                // 显示保存成功的提示
+                let saveSuccessTimeout = null;
+                function showSaveSuccess() {{
+                    const msg = document.getElementById('saveSuccess');
+                    if (!msg) return;
+                    msg.style.opacity = 1;
+                    if (saveSuccessTimeout) {{
+                        clearTimeout(saveSuccessTimeout);
+                    }}
+                    // 0.5秒后开始淡出
+                    saveSuccessTimeout = setTimeout(() => {{
+                        msg.style.opacity = 0;
+                    }}, 1000); // 0.5秒淡入 + 0.5秒显示
+                }}
             }});
         }})();
         </script>
@@ -562,6 +591,11 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     if construction_mode:
         flag += " - ReadOnly - ReadOnly is about to be restored due to construction and website may be temporarily offline"
 
+    # 如果需要，添加保存成功的提示元素
+    save_success_div = '''
+    <div id="saveSuccess" class="save-success">√ Saved</div>
+    '''
+
     # 构建HTML
     # 使用html.escape(content)确保内容安全
     escaped_content = html.escape(content)
@@ -583,6 +617,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         <div class="flag">
             {flag}
         </div>
+        {save_success_div}
         {'' if read_only or construction_mode else js}
     </body>
     </html>
