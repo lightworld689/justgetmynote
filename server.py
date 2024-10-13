@@ -25,6 +25,7 @@ MAIN_SETTINGS_FILE = os.path.join(SETTINGS_FOLDER, 'main.txt')
 # 正则表达式用于验证标识符（3-24 个字母或数字）
 ID_REGEX = re.compile(r'^[A-Za-z0-9]{3,24}$')
 SHARE_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')  # 16-character hex
+BURN_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')   # 16-character hex for burn links
 
 # 禁用 Flask 默认的日志
 log = logging.getLogger('werkzeug')
@@ -44,7 +45,8 @@ cache = {
     'main_text': '',
     'settings': {},
     'contents': {},        # id -> content
-    'share_contents': {}   # share_id -> content  # 新增：用于缓存共享内容
+    'share_contents': {},  # share_id -> content
+    'burn_contents': {}    # burn_id -> content
 }
 cache_lock = threading.Lock()
 
@@ -63,6 +65,14 @@ def init_db():
             id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
             share_id TEXT UNIQUE
+        )
+    ''')
+
+    # 创建 burn_contents 表，如果不存在
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS burn_contents (
+            burn_id TEXT PRIMARY KEY,
+            content TEXT NOT NULL
         )
     ''')
 
@@ -149,8 +159,12 @@ def get_db_connection():
 def load_all_contents_to_cache():
     conn = get_db_connection()
     c = conn.cursor()
+    # 加载 contents
     c.execute('SELECT id, content, share_id FROM contents')
     rows = c.fetchall()
+    # 加载 burn_contents
+    c.execute('SELECT burn_id, content FROM burn_contents')
+    burn_rows = c.fetchall()
     conn.close()
     contents = {}
     share_contents = {}
@@ -158,9 +172,13 @@ def load_all_contents_to_cache():
         contents[row['id']] = row['content']
         if row['share_id']:
             share_contents[row['share_id']] = row['content']
+    burn_contents = {}
+    for row in burn_rows:
+        burn_contents[row['burn_id']] = row['content']
     with cache_lock:
         cache['contents'] = contents
         cache['share_contents'] = share_contents  # 更新 share_contents 缓存
+        cache['burn_contents'] = burn_contents    # 更新 burn_contents 缓存
 
 # 生成唯一的16字符十六进制共享ID
 def generate_share_id():
@@ -168,6 +186,13 @@ def generate_share_id():
         share_id = secrets.token_hex(8)  # 16 characters
         if not share_id_exists(share_id):
             return share_id
+
+# 生成唯一的16字符十六进制烧毁ID
+def generate_burn_id():
+    while True:
+        burn_id = secrets.token_hex(8)  # 16 characters
+        if not burn_id_exists(burn_id):
+            return burn_id
 
 # 检查 share_id 是否存在
 def share_id_exists(share_id):
@@ -178,10 +203,24 @@ def share_id_exists(share_id):
     conn.close()
     return row is not None
 
+# 检查 burn_id 是否存在
+def burn_id_exists(burn_id):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('SELECT burn_id FROM burn_contents WHERE burn_id = ?', (burn_id,))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
 # 获取内容通过 share_id（从缓存读取）
 def get_content_by_share_id(share_id):
     with cache_lock:
         return cache['share_contents'].get(share_id, None)
+
+# 获取内容通过 burn_id（从缓存读取）
+def get_content_by_burn_id(burn_id):
+    with cache_lock:
+        return cache['burn_contents'].get(burn_id, None)
 
 # 日志记录装饰器
 def log_request(f):
@@ -197,7 +236,7 @@ def log_request(f):
     return decorated_function
 
 # 渲染HTML页面
-def render_html(content, read_only=False, path='/', identifier=None, custom_flag=None, construction_mode=False):
+def render_html(content, read_only=False, path='/', identifier=None, custom_flag=None, construction_mode=False, burn_after_read=False):
     # 内联CSS
     css = """
     <style>
@@ -266,6 +305,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         padding: 0.5em 1em;
         font-size: 1em;
         cursor: pointer;
+        margin-top: 10px;
       }
       /* 新增：保存成功提示样式 */
       .save-success {
@@ -280,12 +320,51 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         transition: opacity 0.5s ease-in-out;
         z-index: 1000;
       }
+      /* 新增：按钮容器样式 */
+      .button-container {
+        display: flex;
+      }
+      /* 新增：弹窗样式 */
+      .modal {
+        display: none; 
+        position: fixed; 
+        z-index: 1001; 
+        left: 0;
+        top: 0;
+        width: 100%; 
+        height: 100%; 
+        overflow: auto; 
+        background-color: rgba(0,0,0,0.4); 
+      }
+      .modal-content {
+        background-color: #fefefe;
+        margin: 15% auto; 
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%; 
+        max-width: 500px;
+        border-radius: 5px;
+      }
+      .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+      }
+      .close:hover,
+      .close:focus {
+        color: black;
+        text-decoration: none;
+        cursor: pointer;
+      }
     }
     @media print {
       .container,
       .stack,
       .layer,
-      .flag {
+      .flag,
+      .button-container,
+      .modal {
         display:none
       }
       a:link,
@@ -554,6 +633,28 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
                     }});
                 }}
 
+                // 处理Share (Burn after read)按钮点击
+                const burnShareButton = document.getElementById('burnShareButton');
+                if (burnShareButton) {{
+                    burnShareButton.addEventListener('click', function() {{
+                        fetch('/create_burn/{html.escape(identifier)}', {{
+                            method: 'POST'
+                        }})
+                        .then(response => response.json())
+                        .then(data => {{
+                            if (data.status === 'success') {{
+                                const burnUrl = window.location.origin + data.burn_url;
+                                showBurnLink(burnUrl);
+                            }} else {{
+                                alert(data.message);
+                            }}
+                        }})
+                        .catch((error) => {{
+                            console.error('Error:', error);
+                        }});
+                    }});
+                }}
+
                 // 显示保存成功的提示
                 let saveSuccessTimeout = null;
                 function showSaveSuccess() {{
@@ -567,6 +668,32 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
                     saveSuccessTimeout = setTimeout(() => {{
                         msg.style.opacity = 0;
                     }}, 1000); // 0.5秒淡入 + 0.5秒显示
+                }}
+
+                // 显示烧毁链接的弹窗
+                function showBurnLink(url) {{
+                    const modal = document.getElementById('burnModal');
+                    const burnLink = document.getElementById('burnLink');
+                    burnLink.href = url;
+                    burnLink.textContent = url;
+                    modal.style.display = 'block';
+                }}
+
+                // 处理弹窗关闭
+                const closeModal = document.getElementsByClassName('close')[0];
+                if (closeModal) {{
+                    closeModal.onclick = function() {{
+                        const modal = document.getElementById('burnModal');
+                        modal.style.display = 'none';
+                    }}
+                }}
+
+                // 点击弹窗外部关闭弹窗
+                window.onclick = function(event) {{
+                    const modal = document.getElementById('burnModal');
+                    if (event.target == modal) {{
+                        modal.style.display = 'none';
+                    }}
                 }}
             }});
         }})();
@@ -591,6 +718,10 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     if construction_mode:
         flag += " - ReadOnly is about to be restored due to construction and website may be temporarily offline"
 
+    # 如果是阅后即焚页面，追加标识
+    if burn_after_read:
+        flag += " - Burn after read"
+
     # 如果需要，添加保存成功的提示元素
     save_success_div = '''
     <div id="saveSuccess" class="save-success">√ Saved</div>
@@ -610,21 +741,36 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     <body>
         <div class="stack">
             <div class="layer">
-                <textarea id="content" class="content" {'readonly' if read_only or construction_mode else ''} maxlength="100000" style="height:90%; width:100%;">{escaped_content}</textarea>
-                {'<button id="shareButton" style="margin-top:0px;">Share</button>' if not read_only and not construction_mode else ''}
+                <textarea id="content" class="content" {'readonly' if read_only or construction_mode or burn_after_read else ''} maxlength="100000" style="height:90%; width:100%;">{escaped_content}</textarea>
+                {'''
+                <div class="button-container">
+                    <button id="shareButton">Share</button>
+                    <button id="burnShareButton">Share (Burn after read)</button>
+                </div>
+                ''' if not read_only and not construction_mode and not burn_after_read else ''}
             </div>
         </div>
         <div class="flag">
             {flag}
         </div>
         {save_success_div}
-        {'' if read_only or construction_mode else js}
+        {'''
+        <!-- 弹窗 -->
+        <div id="burnModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <p>阅后即焚链接：</p>
+                <a id="burnLink" href="#" target="_blank">链接将在此显示</a>
+            </div>
+        </div>
+        ''' if not read_only and not construction_mode and not burn_after_read else ''}
+        {'' if read_only or construction_mode or burn_after_read else js}
     </body>
     </html>
     """
     return Response(html_content, mimetype='text/html')
 
-# 主路由，处理 /0, /1, /main, /index, /share/<share_id>, /<id>, /
+# 主路由，处理 /0, /1, /main, /index, /share/<share_id>, /burn/<burn_id>, /<id>, /
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 @log_request
@@ -653,6 +799,38 @@ def serve_content(path):
         if construction_mode:
             flag += " - ReadOnly is about to be restored due to construction and website may be temporarily offline"
         return render_html(content, read_only=True, path=f'/share/{share_id}', custom_flag=flag, construction_mode=construction_mode)
+
+    # 处理 /burn/<burn_id> 路由
+    if path.startswith('burn/'):
+        burn_id = path.split('burn/')[1]
+        if not BURN_ID_REGEX.fullmatch(burn_id):
+            return "Invalid Burn ID", 400
+        content = get_content_by_burn_id(burn_id)
+        if not content:
+            return "Burn ID not found or already burned", 404
+
+        # Render the content with burn_after_read flag
+        response = render_html(content, read_only=True, path=f'/burn/{burn_id}', burn_after_read=True, construction_mode=construction_mode)
+
+        # After rendering, delete the burn_id from database and cache
+        def delete_burn_content(burn_id_to_delete):
+            try:
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute('DELETE FROM burn_contents WHERE burn_id = ?', (burn_id_to_delete,))
+                conn.commit()
+                conn.close()
+                with cache_lock:
+                    cache['burn_contents'].pop(burn_id_to_delete, None)
+                logger.info(f"Burn content {burn_id_to_delete} deleted after access.")
+            except Exception as e:
+                logger.error(f"Error deleting burn content {burn_id_to_delete}: {e}")
+
+        # Start a thread to delete the burn content after response is sent
+        delete_thread = threading.Thread(target=delete_burn_content, args=(burn_id,), daemon=True)
+        delete_thread.start()
+
+        return response
 
     # 处理 /<id> 路由
     if ID_REGEX.fullmatch(path):
@@ -755,6 +933,47 @@ def create_share(identifier):
 
     share_url = f"/share/{share_id}"
     return jsonify({'status': 'success', 'share_url': share_url})
+
+# 创建阅后即焚共享链接的API
+@app.route('/create_burn/<identifier>', methods=['POST'])
+@log_request
+def create_burn(identifier):
+    construction_mode = is_construction_mode()
+    if construction_mode:
+        return jsonify({'status': 'error', 'message': 'The site is under maintenance and no shared links can be created.'}), 503
+
+    # 验证标识符
+    if not ID_REGEX.fullmatch(identifier):
+        return jsonify({'status': 'error', 'message': 'Invalid identifier.'}), 400
+
+    with cache_lock:
+        content = cache['contents'].get(identifier, None)
+
+    if content is None:
+        return jsonify({'status': 'error', 'message': 'The identifier does not exist.'}), 404
+
+    # 生成唯一的 burn_id
+    burn_id = generate_burn_id()
+
+    # 插入到 burn_contents 表
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('INSERT INTO burn_contents (burn_id, content) VALUES (?, ?)', (burn_id, content))
+        conn.commit()
+        conn.close()
+    except sqlite3.IntegrityError:
+        return jsonify({'status': 'error', 'message': '生成的 burn_id 冲突，请重试。'}), 500
+    except Exception as e:
+        logger.error(f"Error creating burn content: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal server error.'}), 500
+
+    # 更新缓存中的 burn_contents
+    with cache_lock:
+        cache['burn_contents'][burn_id] = content
+
+    burn_url = f"/burn/{burn_id}"
+    return jsonify({'status': 'success', 'burn_url': burn_url})
 
 # 提供静态文件（如 /meta/bg.png）
 @app.route('/meta/<path:filename>')
