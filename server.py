@@ -759,7 +759,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         <div id="burnModal" class="modal">
             <div class="modal-content">
                 <span class="close">&times;</span>
-                <p>阅后即焚链接：</p>
+                <p>Burn after read link:</p>
                 <a id="burnLink" href="#" target="_blank">链接将在此显示</a>
             </div>
         </div>
