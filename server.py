@@ -4,11 +4,11 @@ import re
 import os
 import logging
 from functools import wraps
-import secrets  # For generating secure random share IDs
-import html     # Import html module for escaping
+import secrets  # 用于生成安全的共享 ID
+import html     # 用于 HTML 转义
 import threading
 import time
-import queue  # Import queue module for write tasks
+import queue  # 用于写入任务
 
 app = Flask(__name__)
 
@@ -24,8 +24,8 @@ MAIN_SETTINGS_FILE = os.path.join(SETTINGS_FOLDER, 'main.txt')
 
 # 正则表达式用于验证标识符（3-24 个字母或数字）
 ID_REGEX = re.compile(r'^[A-Za-z0-9]{3,24}$')
-SHARE_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')  # 16-character hex
-BURN_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')   # 16-character hex for burn links
+SHARE_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')  # 16 字符的十六进制
+BURN_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')   # 16 字符的十六进制用于烧毁链接
 
 # 禁用 Flask 默认的日志
 log = logging.getLogger('werkzeug')
@@ -44,9 +44,9 @@ logger.addHandler(file_handler)
 cache = {
     'main_text': '',
     'settings': {},
-    'contents': {},        # id -> content
-    'share_contents': {},  # share_id -> content
-    'burn_contents': {}    # burn_id -> content
+    'contents': {},        # id -> 内容
+    'share_contents': {},  # share_id -> 内容
+    'burn_contents': {}    # burn_id -> 内容
 }
 cache_lock = threading.Lock()
 
@@ -56,7 +56,7 @@ write_queue = queue.Queue()
 # 初始化数据库
 def init_db():
     conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row  # Set row_factory to access columns by name
+    conn.row_factory = sqlite3.Row  # 设置 row_factory 以便通过名称访问列
     c = conn.cursor()
 
     # 创建 contents 表，如果不存在，添加 share_id 列
@@ -102,23 +102,33 @@ def init_main_txt():
     else:
         print("main.txt 已存在。")
 
-# 确保 meta 文件夹和 bg.png 存在
+# 确保 meta 文件夹和必要的文件存在
 def init_meta():
     if not os.path.exists(META_FOLDER):
         os.makedirs(META_FOLDER)
         print(f"{META_FOLDER} 文件夹已创建。")
-    # 检查 bg.png 是否存在，如果不存在，可以创建一个占位图片或提示用户添加
-    bg_path = os.path.join(META_FOLDER, 'bg.png')
-    if not os.path.exists(bg_path):
+    # 检查 favicon.png 是否存在
+    favicon_path = os.path.join(META_FOLDER, 'favicon.png')
+    if not os.path.exists(favicon_path):
         try:
             from PIL import Image
-            img = Image.new('RGBA', (1, 1), (0, 0, 0, 0))
-            img.save(bg_path)
-            print(f"{bg_path} 已创建。请替换为您需要的背景图片。")
+            img = Image.new('RGBA', (16, 16), (0, 0, 0, 0))
+            img.save(favicon_path)
+            print(f"{favicon_path} 已创建。请替换为您需要的 favicon.png。")
         except ImportError:
-            print("Pillow 未安装，无法创建占位图片。请手动添加 meta/bg.png。")
+            print("Pillow 未安装，无法创建占位 favicon.png。请手动添加 meta/favicon.png。")
+    # 检查 app.png 是否存在
+    app_icon_path = os.path.join(META_FOLDER, 'app.png')
+    if not os.path.exists(app_icon_path):
+        try:
+            from PIL import Image
+            img = Image.new('RGBA', (192, 192), (0, 0, 0, 0))
+            img.save(app_icon_path)
+            print(f"{app_icon_path} 已创建。请替换为您需要的 app.png。")
+        except ImportError:
+            print("Pillow 未安装，无法创建占位 app.png。请手动添加 meta/app.png。")
 
-# 初始化 favicon.ico
+# 初始化 favicon.ico（可选）
 def init_favicon():
     if not os.path.exists(FAVICON_FILE):
         try:
@@ -143,6 +153,461 @@ construction = false
         print(f"{MAIN_SETTINGS_FILE} 已创建。")
     else:
         print(f"{MAIN_SETTINGS_FILE} 已存在。")
+
+# 初始化 lib 文件夹，写入 CSS 和 JavaScript
+def init_lib():
+    if not os.path.exists('lib'):
+        os.makedirs('lib')
+        print("lib 文件夹已创建。")
+    # 写入 CSS 到 lib/abc.css
+    css_content = """
+/* CSS 内容保持不变 */
+@media screen {
+  body {
+    background:url(/meta/bg.png) top left repeat #ebeef2;
+    font-family:Helvetica,Tahoma,Arial,STXihei,华文细黑,microsoft yahei,微软雅黑,SimSun,宋体,Heiti,黑体,sans-serif;
+    font-size:15px
+  }
+  .stack {
+    position:fixed;
+    left:1em;
+    top:1em;
+    right:1em;
+    bottom:1.8em
+  }
+  .layer {
+    position:absolute;
+    left:-3px;
+    right:-3px;
+    top:-3px;
+    bottom:1px;
+    background-color:#fff;
+    border-radius:3.456789px;
+    border:1px solid #ddd;
+    box-shadow:0 0 5px 0 #e4e4e4
+  }
+  .flag {
+    position:fixed;
+    left:0;
+    right:0;
+    bottom:1em;
+    height:.8em;
+    text-align:center;
+    color:#aaa;
+    font-size:14px
+  }
+  a:link,
+  a:visited,
+  a:active {
+    color:#aaa;
+    text-decoration:none;
+    word-break:break-all;
+    -webkit-tap-highlight-color:transparent
+  }
+  *:focus {
+    outline:none
+  }
+  .content {
+    width:100%;
+    height:100%;
+    min-height:100%;
+    resize:none;
+    overflow-y:auto;
+    border-radius:3px;
+    box-sizing:border-box;
+    border:none;
+    padding:.7em .8em;
+    color:#333;
+    font-size:1.1em
+  }
+  .print {
+    display:none
+  }
+  .save-success {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: #4CAF50; /* 绿色背景 */
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+    z-index: 1000;
+  }
+  .modal {
+    display: none; 
+    position: fixed; 
+    z-index: 1001; 
+    left: 0;
+    top: 0;
+    width: 100%; 
+    height: 100%; 
+    overflow: auto; 
+    background-color: rgba(0,0,0,0.4); 
+  }
+  .modal-content {
+    background-color: #fefefe;
+    margin: 15% auto; 
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%; 
+    max-width: 500px;
+    border-radius: 5px;
+  }
+  .close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+  }
+  .close:hover,
+  .close:focus {
+    color: black;
+    text-decoration: none;
+    cursor: pointer;
+  }
+}
+@media print {
+  .container,
+  .stack,
+  .layer,
+  .flag,
+  .button-container,
+  .modal {
+    display:none
+  }
+  a:link,
+  a:visited,
+  a:active {
+    color:#aaa;
+    text-decoration:none;
+    word-break:break-all;
+    -webkit-tap-highlight-color:transparent
+  }
+  .print {
+    font-size:1.1em
+  }
+}
+html {
+  line-height:1.15;
+  -ms-text-size-adjust:100%;
+  -webkit-text-size-adjust:100%
+}
+body {
+  margin:0
+}
+article,
+aside,
+footer,
+header,
+nav,
+section {
+  display:block
+}
+h1 {
+  font-size:2em;
+  margin:.67em 0
+}
+figcaption,
+figure,
+main {
+  display:block
+}
+figure {
+  margin:1em 40px
+}
+hr {
+  box-sizing:content-box;
+  height:0;
+  overflow:visible
+}
+pre {
+  font-size:1em
+}
+a {
+  background-color:transparent;
+  -webkit-text-decoration-skip:objects
+}
+a:active,
+a:hover {
+  outline-width:0
+}
+abbr[title] {
+  border-bottom:none;
+  text-decoration:underline;
+  text-decoration:underline dotted
+}
+b,
+strong {
+  font-weight:inherit
+}
+b,
+strong {
+  font-weight:bolder
+}
+code,
+kbd,
+samp {
+  font-size:1em
+}
+dfn {
+  font-style:italic
+}
+mark {
+  background-color:#ff0;
+  color:#000
+}
+small {
+  font-size:80%
+}
+sub,
+sup {
+  font-size:75%;
+  line-height:0;
+  position:relative;
+  vertical-align:baseline
+}
+sub {
+  bottom:-.25em
+}
+sup {
+  top:-.5em
+}
+audio,
+video {
+  display:inline-block
+}
+audio:not([controls]) {
+  display:none;
+  height:0
+}
+img {
+  border-style:none
+}
+svg:not(:root) {
+  overflow:hidden
+}
+button,
+input,
+optgroup,
+select,
+textarea {
+  font-family:Helvetica,Tahoma,Arial,STXihei,华文细黑,microsoft yahei,微软雅黑,SimSun,宋体,Heiti,黑体,sans-serif;
+  font-size:15px;
+  line-height:1.15;
+  margin:0
+}
+button,
+input {
+  overflow:visible
+}
+button,
+select {
+  text-transform:none
+}
+button,
+html [type=button],
+[type=reset],
+[type=submit] {
+  -webkit-appearance:button
+}
+button::-moz-focus-inner,
+[type=button]::-moz-focus-inner,
+[type=reset]::-moz-focus-inner,
+[type=submit]::-moz-focus-inner {
+  border-style:none;
+  padding:0
+}
+button:-moz-focusring,
+[type=button]:-moz-focusring,
+[type=reset]:-moz-focusring,
+[type=submit]:-moz-focusring {
+  outline:1px dotted ButtonText
+}
+fieldset {
+  border:1px solid silver;
+  margin:0 2px;
+  padding:.35em .625em .75em
+}
+legend {
+  box-sizing:border-box;
+  color:inherit;
+  display:table;
+  max-width:100%;
+  padding:0;
+  white-space:normal
+}
+progress {
+  display:inline-block;
+  vertical-align:baseline
+}
+textarea {
+  overflow:auto
+}
+[type=checkbox],
+[type=radio] {
+  box-sizing:border-box;
+  padding:0
+}
+[type=number]::-webkit-inner-spin-button,
+[type=number]::-webkit-outer-spin-button {
+  height:auto
+}
+[type=search] {
+  -webkit-appearance:textfield;
+  outline-offset:-2px
+}
+[type=search]::-webkit-search-cancel-button,
+[type=search]::-webkit-search-decoration {
+  -webkit-appearance:none
+}
+::-webkit-file-upload-button {
+  -webkit-appearance:button;
+  font:inherit
+}
+details,
+menu {
+  display:block
+}
+summary {
+  display:list-item
+}
+canvas {
+  display:inline-block
+}
+template {
+  display:none
+}
+[hidden] {
+  display:none
+}
+"""
+    with open(os.path.join('lib', 'abc.css'), 'w', encoding='utf-8') as f:
+        f.write(css_content)
+    # 写入 JavaScript 到 lib/abc.js
+    js_content = """
+(function(){
+    document.addEventListener('DOMContentLoaded', function() {
+        const contentArea = document.getElementById('content');
+        let lastContent = contentArea.value;
+
+        // 自动保存内容每秒检测一次
+        setInterval(function() {
+            const currentContent = contentArea.value;
+            if (currentContent !== lastContent) {
+                fetch('/update/' + encodeURIComponent(identifier), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 'content': currentContent })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        console.log('Update successful');
+                        lastContent = currentContent;
+                        showSaveSuccess();
+                    } else {
+                        alert(data.message);
+                    }
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+            }
+        }, 1000); // 每秒检测一次
+
+        // 处理 Share 按钮点击
+        const shareButton = document.getElementById('shareButton');
+        if (shareButton) {
+            shareButton.addEventListener('click', function() {
+                fetch('/create_share/' + encodeURIComponent(identifier), {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const shareUrl = window.location.origin + data.share_url;
+                        window.open(shareUrl, '_blank');
+                    } else {
+                        alert(data.message);
+                    }
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+            });
+        }
+
+        // 处理 Share (Burn after read) 按钮点击
+        const burnShareButton = document.getElementById('burnShareButton');
+        if (burnShareButton) {
+            burnShareButton.addEventListener('click', function() {
+                fetch('/create_burn/' + encodeURIComponent(identifier), {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const burnUrl = window.location.origin + data.burn_url;
+                        showBurnLink(burnUrl);
+                    } else {
+                        alert(data.message);
+                    }
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+            });
+        }
+
+        // 显示保存成功的提示
+        let saveSuccessTimeout = null;
+        function showSaveSuccess() {
+            const msg = document.getElementById('saveSuccess');
+            if (!msg) return;
+            msg.style.opacity = 1;
+            if (saveSuccessTimeout) {
+                clearTimeout(saveSuccessTimeout);
+            }
+            // 1秒后开始淡出
+            saveSuccessTimeout = setTimeout(() => {
+                msg.style.opacity = 0;
+            }, 1000); // 1秒显示
+        }
+
+        // 显示烧毁链接的弹窗
+        function showBurnLink(url) {
+            const modal = document.getElementById('burnModal');
+            const burnLink = document.getElementById('burnLink');
+            burnLink.href = url;
+            burnLink.textContent = url;
+            modal.style.display = 'block';
+        }
+
+        // 处理弹窗关闭
+        const closeModal = document.getElementsByClassName('close')[0];
+        if (closeModal) {
+            closeModal.onclick = function() {
+                const modal = document.getElementById('burnModal');
+                modal.style.display = 'none';
+            }
+        }
+
+        // 点击弹窗外部关闭弹窗
+        window.onclick = function(event) {
+            const modal = document.getElementById('burnModal');
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
+        }
+    });
+})();
+"""
+    with open(os.path.join('lib', 'abc.js'), 'w', encoding='utf-8') as f:
+        f.write(js_content)
 
 # 读取 construction 模式（从缓存获取）
 def is_construction_mode():
@@ -183,14 +648,14 @@ def load_all_contents_to_cache():
 # 生成唯一的16字符十六进制共享ID
 def generate_share_id():
     while True:
-        share_id = secrets.token_hex(8)  # 16 characters
+        share_id = secrets.token_hex(8)  # 16 个字符
         if not share_id_exists(share_id):
             return share_id
 
 # 生成唯一的16字符十六进制烧毁ID
 def generate_burn_id():
     while True:
-        burn_id = secrets.token_hex(8)  # 16 characters
+        burn_id = secrets.token_hex(8)  # 16 个字符
         if not burn_id_exists(burn_id):
             return burn_id
 
@@ -237,476 +702,16 @@ def log_request(f):
 
 # 渲染HTML页面
 def render_html(content, read_only=False, path='/', identifier=None, custom_flag=None, construction_mode=False, burn_after_read=False):
-    # 内联CSS
-    css = """
-    <style>
-    @media screen {
-      body {
-        background:url(/meta/bg.png) top left repeat #ebeef2;
-        font-family:Helvetica,Tahoma,Arial,STXihei,华文细黑,microsoft yahei,微软雅黑,SimSun,宋体,Heiti,黑体,sans-serif;
-        font-size:15px
-      }
-      .stack {
-        position:fixed;
-        left:1em;
-        top:1em;
-        right:1em;
-        bottom:1.8em
-      }
-      .layer {
-        position:absolute;
-        left:-3px;
-        right:-3px;
-        top:-3px;
-        bottom:1px;
-        background-color:#fff;
-        border-radius:3.456789px;
-        border:1px solid #ddd;
-        box-shadow:0 0 5px 0 #e4e4e4
-      }
-      .flag {
-        position:fixed;
-        left:0;
-        right:0;
-        bottom:1em;
-        height:.8em;
-        text-align:center;
-        color:#aaa;
-        font-size:14px
-      }
-      a:link,
-      a:visited,
-      a:active {
-        color:#aaa;
-        text-decoration:none;
-        word-break:break-all;
-        -webkit-tap-highlight-color:transparent
-      }
-      *:focus {
-        outline:none
-      }
-      .content {
-        width:100%;
-        height:100%;
-        min-height:100%;
-        resize:none;
-        overflow-y:auto;
-        border-radius:3px;
-        box-sizing:border-box;
-        border:none;
-        padding:.7em .8em;
-        color:#333;
-        font-size:1.1em
-      }
-      .print {
-        display:none
-      }
-      button {
-        padding: 0.5em 1em;
-        font-size: 1em;
-        cursor: pointer;
-        margin-top: 10px;
-      }
-      /* 新增：保存成功提示样式 */
-      .save-success {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background-color: #4CAF50; /* 绿色背景 */
-        color: white;
-        padding: 10px 20px;
-        border-radius: 5px;
-        opacity: 0;
-        transition: opacity 0.5s ease-in-out;
-        z-index: 1000;
-      }
-      /* 新增：按钮容器样式 */
-      .button-container {
-        display: flex;
-      }
-      /* 新增：弹窗样式 */
-      .modal {
-        display: none; 
-        position: fixed; 
-        z-index: 1001; 
-        left: 0;
-        top: 0;
-        width: 100%; 
-        height: 100%; 
-        overflow: auto; 
-        background-color: rgba(0,0,0,0.4); 
-      }
-      .modal-content {
-        background-color: #fefefe;
-        margin: 15% auto; 
-        padding: 20px;
-        border: 1px solid #888;
-        width: 80%; 
-        max-width: 500px;
-        border-radius: 5px;
-      }
-      .close {
-        color: #aaa;
-        float: right;
-        font-size: 28px;
-        font-weight: bold;
-      }
-      .close:hover,
-      .close:focus {
-        color: black;
-        text-decoration: none;
-        cursor: pointer;
-      }
-    }
-    @media print {
-      .container,
-      .stack,
-      .layer,
-      .flag,
-      .button-container,
-      .modal {
-        display:none
-      }
-      a:link,
-      a:visited,
-      a:active {
-        color:#aaa;
-        text-decoration:none;
-        word-break:break-all;
-        -webkit-tap-highlight-color:transparent
-      }
-      .print {
-        font-size:1.1em
-      }
-    }
-    html {
-      line-height:1.15;
-      -ms-text-size-adjust:100%;
-      -webkit-text-size-adjust:100%
-    }
-    body {
-      margin:0
-    }
-    article,
-    aside,
-    footer,
-    header,
-    nav,
-    section {
-      display:block
-    }
-    h1 {
-      font-size:2em;
-      margin:.67em 0
-    }
-    figcaption,
-    figure,
-    main {
-      display:block
-    }
-    figure {
-      margin:1em 40px
-    }
-    hr {
-      box-sizing:content-box;
-      height:0;
-      overflow:visible
-    }
-    pre {
-      font-size:1em
-    }
-    a {
-      background-color:transparent;
-      -webkit-text-decoration-skip:objects
-    }
-    a:active,
-    a:hover {
-      outline-width:0
-    }
-    abbr[title] {
-      border-bottom:none;
-      text-decoration:underline;
-      text-decoration:underline dotted
-    }
-    b,
-    strong {
-      font-weight:inherit
-    }
-    b,
-    strong {
-      font-weight:bolder
-    }
-    code,
-    kbd,
-    samp {
-      font-size:1em
-    }
-    dfn {
-      font-style:italic
-    }
-    mark {
-      background-color:#ff0;
-      color:#000
-    }
-    small {
-      font-size:80%
-    }
-    sub,
-    sup {
-      font-size:75%;
-      line-height:0;
-      position:relative;
-      vertical-align:baseline
-    }
-    sub {
-      bottom:-.25em
-    }
-    sup {
-      top:-.5em
-    }
-    audio,
-    video {
-      display:inline-block
-    }
-    audio:not([controls]) {
-      display:none;
-      height:0
-    }
-    img {
-      border-style:none
-    }
-    svg:not(:root) {
-      overflow:hidden
-    }
-    button,
-    input,
-    optgroup,
-    select,
-    textarea {
-      font-family:Helvetica,Tahoma,Arial,STXihei,华文细黑,microsoft yahei,微软雅黑,SimSun,宋体,Heiti,黑体,sans-serif;
-      font-size:15px;
-      line-height:1.15;
-      margin:0
-    }
-    button,
-    input {
-      overflow:visible
-    }
-    button,
-    select {
-      text-transform:none
-    }
-    button,
-    html [type=button],
-    [type=reset],
-    [type=submit] {
-      -webkit-appearance:button
-    }
-    button::-moz-focus-inner,
-    [type=button]::-moz-focus-inner,
-    [type=reset]::-moz-focus-inner,
-    [type=submit]::-moz-focus-inner {
-      border-style:none;
-      padding:0
-    }
-    button:-moz-focusring,
-    [type=button]:-moz-focusring,
-    [type=reset]:-moz-focusring,
-    [type=submit]:-moz-focusring {
-      outline:1px dotted ButtonText
-    }
-    fieldset {
-      border:1px solid silver;
-      margin:0 2px;
-      padding:.35em .625em .75em
-    }
-    legend {
-      box-sizing:border-box;
-      color:inherit;
-      display:table;
-      max-width:100%;
-      padding:0;
-      white-space:normal
-    }
-    progress {
-      display:inline-block;
-      vertical-align:baseline
-    }
-    textarea {
-      overflow:auto
-    }
-    [type=checkbox],
-    [type=radio] {
-      box-sizing:border-box;
-      padding:0
-    }
-    [type=number]::-webkit-inner-spin-button,
-    [type=number]::-webkit-outer-spin-button {
-      height:auto
-    }
-    [type=search] {
-      -webkit-appearance:textfield;
-      outline-offset:-2px
-    }
-    [type=search]::-webkit-search-cancel-button,
-    [type=search]::-webkit-search-decoration {
-      -webkit-appearance:none
-    }
-    ::-webkit-file-upload-button {
-      -webkit-appearance:button;
-      font:inherit
-    }
-    details,
-    menu {
-      display:block
-    }
-    summary {
-      display:list-item
-    }
-    canvas {
-      display:inline-block
-    }
-    template {
-      display:none
-    }
-    [hidden] {
-      display:none
-    }
-    </style>
-    """
+    # 转义内容以确保安全的 HTML 渲染
+    escaped_content = html.escape(content)
 
-    # 内联JavaScript，实现客户端每秒检测内容变化，并处理分享按钮
-    if not read_only and identifier and not construction_mode:
-        js = f"""
-        <script>
-        (function(){{
-            document.addEventListener('DOMContentLoaded', function() {{
-                const contentArea = document.getElementById('content');
-                let lastContent = contentArea.value;
+    # 确定 textarea 是否应为只读
+    readonly_attr = 'readonly' if read_only or construction_mode or burn_after_read else ''
 
-                // 自动保存内容 every second
-                setInterval(function() {{
-                    const currentContent = contentArea.value;
-                    if (currentContent !== lastContent) {{
-                        fetch('/update/{html.escape(identifier)}', {{
-                            method: 'POST',
-                            headers: {{
-                                'Content-Type': 'application/json'
-                            }},
-                            body: JSON.stringify({{ 'content': currentContent }})
-                        }})
-                        .then(response => response.json())
-                        .then(data => {{
-                            if (data.status === 'success') {{
-                                console.log('更新成功');
-                                lastContent = currentContent;
-                                showSaveSuccess();
-                            }} else {{
-                                alert(data.message);
-                            }}
-                        }})
-                        .catch((error) => {{
-                            console.error('Error:', error);
-                        }});
-                    }}
-                }}, 1000); // 每秒检测一次
-
-                // 处理Share按钮点击
-                const shareButton = document.getElementById('shareButton');
-                if (shareButton) {{
-                    shareButton.addEventListener('click', function() {{
-                        fetch('/create_share/{html.escape(identifier)}', {{
-                            method: 'POST'
-                        }})
-                        .then(response => response.json())
-                        .then(data => {{
-                            if (data.status === 'success') {{
-                                const shareUrl = window.location.origin + data.share_url;
-                                window.open(shareUrl, '_blank');
-                            }} else {{
-                                alert(data.message);
-                            }}
-                        }})
-                        .catch((error) => {{
-                            console.error('Error:', error);
-                        }});
-                    }});
-                }}
-
-                // 处理Share (Burn after read)按钮点击
-                const burnShareButton = document.getElementById('burnShareButton');
-                if (burnShareButton) {{
-                    burnShareButton.addEventListener('click', function() {{
-                        fetch('/create_burn/{html.escape(identifier)}', {{
-                            method: 'POST'
-                        }})
-                        .then(response => response.json())
-                        .then(data => {{
-                            if (data.status === 'success') {{
-                                const burnUrl = window.location.origin + data.burn_url;
-                                showBurnLink(burnUrl);
-                            }} else {{
-                                alert(data.message);
-                            }}
-                        }})
-                        .catch((error) => {{
-                            console.error('Error:', error);
-                        }});
-                    }});
-                }}
-
-                // 显示保存成功的提示
-                let saveSuccessTimeout = null;
-                function showSaveSuccess() {{
-                    const msg = document.getElementById('saveSuccess');
-                    if (!msg) return;
-                    msg.style.opacity = 1;
-                    if (saveSuccessTimeout) {{
-                        clearTimeout(saveSuccessTimeout);
-                    }}
-                    // 0.5秒后开始淡出
-                    saveSuccessTimeout = setTimeout(() => {{
-                        msg.style.opacity = 0;
-                    }}, 1000); // 0.5秒淡入 + 0.5秒显示
-                }}
-
-                // 显示烧毁链接的弹窗
-                function showBurnLink(url) {{
-                    const modal = document.getElementById('burnModal');
-                    const burnLink = document.getElementById('burnLink');
-                    burnLink.href = url;
-                    burnLink.textContent = url;
-                    modal.style.display = 'block';
-                }}
-
-                // 处理弹窗关闭
-                const closeModal = document.getElementsByClassName('close')[0];
-                if (closeModal) {{
-                    closeModal.onclick = function() {{
-                        const modal = document.getElementById('burnModal');
-                        modal.style.display = 'none';
-                    }}
-                }}
-
-                // 点击弹窗外部关闭弹窗
-                window.onclick = function(event) {{
-                    const modal = document.getElementById('burnModal');
-                    if (event.target == modal) {{
-                        modal.style.display = 'none';
-                    }}
-                }}
-            }});
-        }})();
-        </script>
-        """
-    else:
-        js = ""  # No JavaScript needed for read-only pages or construction mode
-
-    # 构建 flag 部分
+    # 构建 flag 内容
     if custom_flag:
         flag = custom_flag
     else:
-        # 使用html.escape确保path安全
         escaped_path = html.escape(path)
         flag = f'''
         <a href="https://github.com/lightworld689/justgetmynote" target="_blank">JustGetMyNote</a> - {escaped_path}
@@ -714,7 +719,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
         if read_only:
             flag += " - ReadOnly"
 
-    # 如果是维护模式，添加额外的信息
+    # 如果处于维护模式，添加额外的信息
     if construction_mode:
         flag += " - ReadOnly is about to be restored due to construction and website may be temporarily offline"
 
@@ -722,52 +727,71 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     if burn_after_read:
         flag += " - Burn after read"
 
-    # 如果需要，添加保存成功的提示元素
-    save_success_div = '''
-    <div id="saveSuccess" class="save-success">√ Saved</div>
-    '''
-
-    # 构建HTML
-    # 使用html.escape(content)确保内容安全
-    escaped_content = html.escape(content)
+    # 构建 HTML 内容
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <meta charset="UTF-8">
-        <title>JustGetMyNote</title>
-        {css}
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ebeef2" />
+    <title>JustGetMyNote</title>
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui, viewport-fit=cover">
+    <meta name="format-detection" content="telephone=no" />
+    <link href="/lib/abc.css" rel="stylesheet" />
+    <link rel="shortcut icon" href="/meta/favicon.png" type="image/png" />
+    <link rel="icon" href="/meta/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/meta/app.png" />
+    <link rel="apple-touch-icon-precomposed" href="/meta/app.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="msapplication-TileColor" content="ebeef2" />
+    <meta name="msapplication-TileImage" content="/meta/app.png" />
+    <meta name="theme-color" content="#ebeef2">
+    <meta property="og:title" content="JustGetMyNote" />
+    <meta property="og:site_name" content="JustGetMyNote" />
+    <meta property="og:description" content="Take notes with simplicity" />
+    <meta property="og:image" content="/meta/app.png" />
     </head>
     <body>
-        <div class="stack">
-            <div class="layer">
-                <textarea id="content" class="content" {'readonly' if read_only or construction_mode or burn_after_read else ''} maxlength="100000" style="height:90%; width:100%;">{escaped_content}</textarea>
-                {'''
-                <div class="button-container">
-                    <button id="shareButton">Share</button>
-                    <button id="burnShareButton">Share (Burn after read)</button>
-                </div>
-                ''' if not read_only and not construction_mode and not burn_after_read else ''}
-            </div>
+    <div class="stack">
+    <div class="layer">
+    <div class="layer">
+    <div class="layer">
+    <textarea id="content" class="content" {readonly_attr} maxlength="100000">{escaped_content}</textarea>
+    </div>
+    </div>
+    </div>
+    <div class="flag">
+    {flag}
+    {'''
+    <a href="#" id="shareButton">- Share</a> <a href="#" id="burnShareButton">- Share (Burn after read)</a>
+    ''' if not read_only and not construction_mode and not burn_after_read else ''}
+    </div>
+    <pre class="print"></pre>
+    {'''
+    <!-- 阅后即焚弹窗 -->
+    <div id="burnModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <p>Burn after read link:</p>
+            <a id="burnLink" href="#" target="_blank">Link will appear here</a>
         </div>
-        <div class="flag">
-            {flag}
-        </div>
-        {save_success_div}
-        {'''
-        <!-- 弹窗 -->
-        <div id="burnModal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <p>Burn after read link:</p>
-                <a id="burnLink" href="#" target="_blank">链接将在此显示</a>
-            </div>
-        </div>
-        ''' if not read_only and not construction_mode and not burn_after_read else ''}
-        {'' if read_only or construction_mode or burn_after_read else js}
+    </div>
+    ''' if not read_only and not construction_mode and not burn_after_read else ''}
+    <div id="saveSuccess" class="save-success">√ Saved</div>
+    {'' if read_only or construction_mode or burn_after_read else f'''
+    <script>
+        const identifier = '{html.escape(identifier)}';
+    </script>
+    <script src="/lib/abc.js"></script>
+    '''}
     </body>
     </html>
     """
+
     return Response(html_content, mimetype='text/html')
 
 # 主路由，处理 /0, /1, /main, /index, /share/<share_id>, /burn/<burn_id>, /<id>, /
@@ -809,10 +833,10 @@ def serve_content(path):
         if not content:
             return "Burn ID not found or already burned", 404
 
-        # Render the content with burn_after_read flag
+        # 渲染内容，并设置 burn_after_read 标志
         response = render_html(content, read_only=True, path=f'/burn/{burn_id}', burn_after_read=True, construction_mode=construction_mode)
 
-        # After rendering, delete the burn_id from database and cache
+        # 渲染后，从数据库和缓存中删除 burn_id
         def delete_burn_content(burn_id_to_delete):
             try:
                 conn = get_db_connection()
@@ -826,7 +850,7 @@ def serve_content(path):
             except Exception as e:
                 logger.error(f"Error deleting burn content {burn_id_to_delete}: {e}")
 
-        # Start a thread to delete the burn content after response is sent
+        # 启动线程在响应后删除烧毁内容
         delete_thread = threading.Thread(target=delete_burn_content, args=(burn_id,), daemon=True)
         delete_thread.start()
 
@@ -845,7 +869,7 @@ def serve_content(path):
     # 如果路由不匹配，返回 404
     return "404 Not Found<br />Maybe try 3-24 digit letters and numbers?", 404
 
-# 更新内容的API
+# 更新内容的 API
 @app.route('/update/<identifier>', methods=['POST'])
 @log_request
 def update(identifier):
@@ -889,7 +913,7 @@ def update(identifier):
 
     return jsonify({'status': 'success'})
 
-# 创建共享链接的API
+# 创建共享链接的 API
 @app.route('/create_share/<identifier>', methods=['POST'])
 @log_request
 def create_share(identifier):
@@ -934,7 +958,7 @@ def create_share(identifier):
     share_url = f"/share/{share_id}"
     return jsonify({'status': 'success', 'share_url': share_url})
 
-# 创建阅后即焚共享链接的API
+# 创建阅后即焚共享链接的 API
 @app.route('/create_burn/<identifier>', methods=['POST'])
 @log_request
 def create_burn(identifier):
@@ -980,6 +1004,12 @@ def create_burn(identifier):
 @log_request
 def meta_static(filename):
     return send_from_directory(META_FOLDER, filename)
+
+# 提供静态文件（如 /lib/abc.css 和 /lib/abc.js）
+@app.route('/lib/<path:filename>')
+@log_request
+def lib_static(filename):
+    return send_from_directory('lib', filename)
 
 # 提供 favicon.ico
 @app.route('/favicon.ico')
@@ -1072,6 +1102,7 @@ if __name__ == '__main__':
     init_meta()
     init_favicon()
     init_settings()
+    init_lib()
 
     # 初次加载缓存
     try:
