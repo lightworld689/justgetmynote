@@ -767,7 +767,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
     <div class="flag">
     {flag}
     {'''
-    <a href="#" id="shareButton">- Share</a> <a href="#" id="burnShareButton">- Share (Burn after read)</a>
+    <a href="#" id="shareButton">- [Share]</a> <a href="#" id="burnShareButton">- [Share (Burn after read)]</a>
     ''' if not read_only and not construction_mode and not burn_after_read else ''}
     </div>
     <pre class="print"></pre>
