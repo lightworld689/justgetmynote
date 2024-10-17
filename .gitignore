@@ -4,3 +4,4 @@ log.log
 meta/bg.png
 favicon.ico
 meta/
+__pycache__/

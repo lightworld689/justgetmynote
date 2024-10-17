@@ -9,6 +9,7 @@ import html     # 用于 HTML 转义
 import threading
 import time
 import queue  # 用于写入任务
+from asgiref.wsgi import WsgiToAsgi  # 导入 WSGI 转 ASGI 的适配器
 
 app = Flask(__name__)
 
@@ -1094,8 +1095,8 @@ def process_write_queue():
         # 等待10秒
         time.sleep(10)
 
-# 启动服务器
-if __name__ == '__main__':
+# 初始化应用程序
+def initialize_app():
     # 初始化数据库和文件
     init_db()
     init_main_txt()
@@ -1144,5 +1145,13 @@ if __name__ == '__main__':
     write_thread = threading.Thread(target=process_write_queue, daemon=True)
     write_thread.start()
 
+# 调用初始化函数
+initialize_app()
+
+# 创建 ASGI 应用程序
+main = WsgiToAsgi(app)
+
+# 启动服务器
+if __name__ == '__main__':
     # 启动 Flask 服务器
     app.run(host='0.0.0.0', port=PORT, threaded=True)
