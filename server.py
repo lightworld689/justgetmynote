@@ -22,8 +22,8 @@ FAVICON_FILE = 'favicon.ico'
 SETTINGS_FOLDER = 'settings'
 MAIN_SETTINGS_FILE = os.path.join(SETTINGS_FOLDER, 'main.txt')
 
-# 正则表达式用于验证标识符（3-24 个字母或数字）
-ID_REGEX = re.compile(r'^[A-Za-z0-9]{3,24}$')
+# 正则表达式用于验证标识符（1-24 个字母或数字）
+ID_REGEX = re.compile(r'^[A-Za-z0-9]{1,24}$')
 SHARE_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')  # 16 字符的十六进制
 BURN_ID_REGEX = re.compile(r'^[A-Fa-f0-9]{16}$')   # 16 字符的十六进制用于烧毁链接
 
@@ -794,7 +794,7 @@ def render_html(content, read_only=False, path='/', identifier=None, custom_flag
 
     return Response(html_content, mimetype='text/html')
 
-# 主路由，处理 /0, /1, /main, /index, /share/<share_id>, /burn/<burn_id>, /<id>, /
+# 主路由，处理 /,  /share/<share_id>, /burn/<burn_id>, /<id>, /
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 @log_request
@@ -802,7 +802,7 @@ def serve_content(path):
     construction_mode = is_construction_mode()
 
     # 处理主路由
-    if path in ['', '0', '1', 'main', 'index']:
+    if path in ['']:
         with cache_lock:
             content = cache['main_text']
         display_path = '/' if path == '' else f'/{path}'
@@ -867,7 +867,7 @@ def serve_content(path):
         return render_html(content, read_only=read_only, path=display_path, identifier=identifier, construction_mode=construction_mode)
 
     # 如果路由不匹配，返回 404
-    return "404 Not Found<br />Maybe try 3-24 digit letters and numbers?", 404
+    return "404 Not Found<br />Maybe try 1-24 digit letters and numbers?", 404
 
 # 更新内容的 API
 @app.route('/update/<identifier>', methods=['POST'])
